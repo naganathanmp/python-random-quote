@@ -55,4 +55,10 @@ Status: **noted – not started** (waiting for the remaining feedback before bui
 - Limitation to communicate: apps like WhatsApp and screenshots remove metadata, so "no metadata"
   is not proof of a fake; findings are signals for review, not a verdict.
 
+## Release checklist for the next version
+- Update the interactive user guide (https://claude.ai/artifact/6joD8yvMhd77N3u6eSb56N) together
+  with the release: new features (duplicate check, AI/fake detection & Trust check, provenance
+  statement, e-signature), new screens in the app tour, quiz/FAQ/glossary entries, and the new APK
+  download link / version number.
+
 ## (More feedback to be added here)
