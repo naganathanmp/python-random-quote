@@ -37,4 +37,22 @@ Status: **noted – not started** (waiting for the remaining feedback before bui
 - Decision needed later: self-signed key (recipients see "signature valid, signer not verified by a
   certificate authority") vs. using the user's/firm's own digital signature certificate (DSC).
 
+## 5. Read the metadata of every uploaded file (bills AND supporting documents) – "Trust check"
+- Read and analyse the hidden metadata of all uploaded images, PDFs and documents, including
+  supporting documents, to flag AI-generated or fake / edited invoices. Runs on the phone, offline.
+- Images (EXIF / XMP / IPTC / C2PA): camera make & model vs. no camera at all, capture date vs. the
+  bill date, editing software (photo editors, design tools, AI image tools), IPTC
+  `DigitalSourceType` (AI-generated / composite), C2PA Content Credentials, screenshot markers,
+  GPS location vs. the client location visited (if present).
+- PDFs: Producer / Creator (e.g. AI tools, online "invoice generator" sites, image editors),
+  creation vs. modification date, incremental updates (edited after it was created), XMP history.
+- Office files: author, application, created / modified dates.
+- Invoice content checks: GSTIN format + checksum validation, invoice date vs. travel period,
+  same invoice number reused across different amounts / vendors.
+- Output: a per-bill "Trust check" panel (what was found and why it matters), an overall risk
+  level (OK / Review / High risk), AI markers → blocked, other red flags → must be acknowledged with
+  a reason, summary of flagged bills before generating the statement.
+- Limitation to communicate: apps like WhatsApp and screenshots remove metadata, so "no metadata"
+  is not proof of a fake; findings are signals for review, not a verdict.
+
 ## (More feedback to be added here)
