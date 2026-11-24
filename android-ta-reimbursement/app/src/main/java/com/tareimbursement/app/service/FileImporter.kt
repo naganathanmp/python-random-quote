@@ -36,7 +36,10 @@ class FileImporter(
     private val repo: Repository,
     private val extractor: TextExtractor,
     private val cacheDir: File,
+    /** Security policy for incoming URIs (see [UriPolicy]); the app passes the strict policy. */
+    private val uriAllowed: (Uri) -> Boolean = { true },
 ) {
+
     data class Source(val file: File, val name: String)
 
     suspend fun importUris(tripId: Long, uris: List<Uri>, attachToExpenseId: Long? = null, onProgress: (ImportProgress) -> Unit = {}): ImportResult = withContext(Dispatchers.IO) {
@@ -47,12 +50,27 @@ class FileImporter(
             uris.forEachIndexed { i, uri ->
                 val name = displayName(uri) ?: "file_${i + 1}"
                 onProgress(ImportProgress(0, uris.size, "Copying $name"))
-                val f = File(staging, "src_${i}_" + name.replace(Regex("[^A-Za-z0-9._ ()\\-]"), "_"))
+                val f = File(staging, "src_${i}_" + name.replace(Regex("[^A-Za-z0-9._ ()\\-]"), "_").take(80))
+                if (!uriAllowed(uri)) { skipped += "$name (not allowed: only files shared from other apps or the camera can be imported)"; return@forEachIndexed }
                 try {
                     val input = resolver.openInputStream(uri) ?: throw IllegalStateException("cannot open")
-                    input.use { inp -> f.outputStream().use { inp.copyTo(it) } }
-                    if (f.length() == 0L) { skipped += "$name (empty file)"; f.delete() } else sources += Source(f, name)
+                    var tooBig = false
+                    input.use { inp -> f.outputStream().use { out ->
+                        val buf = ByteArray(64 * 1024); var total = 0L
+                        while (true) {
+                            val r = inp.read(buf); if (r < 0) break
+                            total += r
+                            if (total > MAX_FILE_BYTES) { tooBig = true; break }
+                            out.write(buf, 0, r)
+                        }
+                    } }
+                    when {
+                        tooBig -> { skipped += "$name (larger than ${MAX_FILE_BYTES / 1024 / 1024} MB)"; f.delete() }
+                        f.length() == 0L -> { skipped += "$name (empty file)"; f.delete() }
+                        else -> sources += Source(f, name)
+                    }
                 } catch (e: Exception) {
+                    f.delete()
                     skipped += "$name (could not be read)"
                 }
             }
@@ -92,7 +110,7 @@ class FileImporter(
             val type = FileSniffer.sniff(s.file, s.name)
             if (type == SniffedType.AUDIO) { skipped += "${s.name} (audio files are not supported)"; return@forEachIndexed }
             val kind = kindOf(type)
-            val ext = s.name.substringAfterLast('.', "").lowercase().takeIf { it.length in 1..5 } ?: defaultExt(type)
+            val ext = UriPolicy.safeExtension(s.name) ?: defaultExt(type)
             val stored = File(attDir, "${UUID.randomUUID()}.$ext")
             try {
                 s.file.copyTo(stored, overwrite = true)
@@ -144,6 +162,9 @@ class FileImporter(
     } catch (e: Exception) { uri.lastPathSegment?.substringAfterLast('/') }
 
     companion object {
+        /** Largest single file accepted (protects storage from oversized / malicious uploads). */
+        const val MAX_FILE_BYTES = 200L * 1024 * 1024
+
         fun kindOf(t: SniffedType): AttachmentKind = when {
             t.isImage -> AttachmentKind.IMAGE
             t == SniffedType.PDF -> AttachmentKind.PDF

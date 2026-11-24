@@ -60,6 +60,7 @@ import kotlin.system.exitProcess
 @Composable
 fun SettingsScreen(nav: NavHostController, modifier: Modifier) {
     val ctx = LocalContext.current
+    var crashLogExists by remember { mutableStateOf(com.tareimbursement.app.service.CrashLog.exists(ctx)) }
     val c = ctx.container
     val scope = rememberCoroutineScope()
     val profile by c.prefs.profile.collectAsState()
@@ -92,10 +93,10 @@ fun SettingsScreen(nav: NavHostController, modifier: Modifier) {
         }
         item {
             SectionCard(title = "Backup & restore") {
-                SettingRow(Icons.Outlined.Backup, "Back up all data", "Saves every claim, bill, output and setting into one ZIP file you keep (e.g. Drive or Downloads).") {
-                    backupLauncher.launch("TA-Reimburse-backup-${LocalDate.now()}.zip")
+                SettingRow(Icons.Outlined.Backup, "Back up all data", "Saves every claim, bill, output and setting into one ZIP file. It contains client data — keep it in a private place.") {
+                    safeLaunch(ctx) { backupLauncher.launch("TA-Reimburse-backup-${LocalDate.now()}.zip") }
                 }
-                SettingRow(Icons.Outlined.Restore, "Restore from backup", "Replaces the data on this phone with a backup file.") { restoreLauncher.launch(arrayOf("application/zip", "application/octet-stream", "*/*")) }
+                SettingRow(Icons.Outlined.Restore, "Restore from backup", "Replaces the data on this phone with a backup file.") { safeLaunch(ctx) { restoreLauncher.launch(arrayOf("application/zip", "application/octet-stream", "*/*")) } }
                 busy?.let { Text(it, style = MaterialTheme.typography.bodySmall); LinearProgressIndicator(Modifier.fillMaxWidth()) }
             }
         }
@@ -106,6 +107,18 @@ fun SettingsScreen(nav: NavHostController, modifier: Modifier) {
                     Spacer(Modifier.width(12.dp))
                     Text("Bills are read on this phone using on-device text recognition. Your invoices, client details and statements are stored only in the app's private storage and are never uploaded. Files leave the phone only when you choose Download, E-mail or Share.",
                         style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+        if (crashLogExists) item {
+            SectionCard(title = "Error report") {
+                Text("The app recorded an unexpected error (technical details only — no claim data).", style = MaterialTheme.typography.bodySmall)
+                Row {
+                    TextButton(onClick = {
+                        if (!com.tareimbursement.app.service.Sharing.share(ctx, listOf(com.tareimbursement.app.service.CrashLog.file(ctx)), "TA Reimburse error report", "Error report from TA Reimburse ${BuildConfig.VERSION_NAME}"))
+                            Toast.makeText(ctx, "No app available to share", Toast.LENGTH_LONG).show()
+                    }) { Text("Share report") }
+                    TextButton(onClick = { com.tareimbursement.app.service.CrashLog.clear(ctx); crashLogExists = false }) { Text("Clear") }
                 }
             }
         }

@@ -240,17 +240,27 @@ fun OutputsPanel(c: AppContainer, t: TripEntity, outputs: ClaimOutputs) {
                     } catch (e: Exception) { Toast.makeText(ctx, "Could not save: ${e.message}", Toast.LENGTH_LONG).show() }
                 }
             }, modifier = Modifier.weight(1f)) { Icon(Icons.Outlined.Download, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text("Download") }
-            FilledTonalButton(onClick = {
+            // E-mail is offered only when a mail app is installed; Share always works.
+            val canEmail = androidx.compose.runtime.remember { Sharing.hasEmailApp(ctx) }
+            if (canEmail) FilledTonalButton(onClick = {
                 scope.launch(kotlinx.coroutines.Dispatchers.Main.immediate) {
                     val p = c.prefs.profile.value
+                    if (p.approverEmail.isBlank()) Toast.makeText(ctx, "Tip: set the approver e-mail in Settings > Profile to pre-fill the recipient", Toast.LENGTH_LONG).show()
+                    val size = outputs.all.sumOf { it.length() }
+                    if (size > 20L * 1024 * 1024) Toast.makeText(ctx, "Attachments are ${size(size)} — your mail app may send large files as a cloud link", Toast.LENGTH_LONG).show()
                     val ok = Sharing.email(ctx, outputs.all, p.approverEmail.split(','), p.ccEmail.split(','), emailSubject(t), emailBody(c, t))
                     if (ok) c.repo.logEvent(t.id, EventType.SHARED, "E-mail drafted to ${p.approverEmail.ifBlank { "recipient" }}")
-                    else Toast.makeText(ctx, "No e-mail app found", Toast.LENGTH_LONG).show()
+                    else Toast.makeText(ctx, "No e-mail app found — use Share instead", Toast.LENGTH_LONG).show()
                 }
             }, modifier = Modifier.weight(1f)) { Icon(Icons.Outlined.Email, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text("E-mail") }
             OutlinedButton(onClick = {
-                scope.launch(kotlinx.coroutines.Dispatchers.Main.immediate) { Sharing.share(ctx, outputs.all, emailSubject(t), emailBody(c, t)); c.repo.logEvent(t.id, EventType.SHARED, "Shared outputs") }
-            }) { Icon(Icons.Outlined.Share, "Share", Modifier.size(18.dp)) }
+                scope.launch(kotlinx.coroutines.Dispatchers.Main.immediate) {
+                    if (Sharing.share(ctx, outputs.all, emailSubject(t), emailBody(c, t))) c.repo.logEvent(t.id, EventType.SHARED, "Shared outputs")
+                    else Toast.makeText(ctx, "No app available to share files", Toast.LENGTH_LONG).show()
+                }
+            }, modifier = if (canEmail) Modifier else Modifier.weight(1f)) {
+                Icon(Icons.Outlined.Share, "Share", Modifier.size(18.dp)); if (!canEmail) { Spacer(Modifier.width(4.dp)); Text("Share") }
+            }
         }
     }
 }

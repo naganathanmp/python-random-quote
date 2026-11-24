@@ -107,7 +107,7 @@ object ZipExpander {
     data class Entry(val file: File, val name: String)
 
     const val MAX_ENTRIES = 500
-    const val MAX_TOTAL_BYTES = 1_500L * 1024 * 1024
+    const val MAX_TOTAL_BYTES = 500L * 1024 * 1024
     const val MAX_DEPTH = 3
 
     fun expand(zip: File, outDir: File, depth: Int = 0, budget: LongArray = longArrayOf(MAX_TOTAL_BYTES), count: IntArray = intArrayOf(0)): List<Entry> {

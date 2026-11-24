@@ -20,7 +20,7 @@ class AppContainer(
 ) {
     val prefs = Prefs(context)
     val repo = Repository(db, context.filesDir)
-    val importer = FileImporter(context.contentResolver, repo, extractor, context.cacheDir)
+    val importer = FileImporter(context.contentResolver, repo, extractor, context.cacheDir) { com.tareimbursement.app.service.UriPolicy.isAllowedForImport(context, it) }
     val exporter = ExportManager(repo, renderer)
     val backup = BackupManager(context) { db }
     val jobs = com.tareimbursement.app.service.Jobs(importer, exporter)
@@ -33,9 +33,15 @@ class TaApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        com.tareimbursement.app.service.CrashLog.install(this, BuildConfig.VERSION_NAME)
         if (!::container.isInitialized) container = AppContainer(this, AppDatabase.build(this))
-        // Clean stale import staging left by a crash.
-        cacheDir.resolve("import").deleteRecursively()
+        // Clean stale import staging / restore leftovers and old camera captures (> 2 days).
+        try {
+            cacheDir.resolve("import").deleteRecursively()
+            cacheDir.resolve("restore").deleteRecursively()
+            val cutoff = System.currentTimeMillis() - 2L * 24 * 3600 * 1000
+            cacheDir.resolve("camera").listFiles()?.filter { it.lastModified() < cutoff }?.forEach { it.delete() }
+        } catch (_: Exception) { }
     }
 }
 

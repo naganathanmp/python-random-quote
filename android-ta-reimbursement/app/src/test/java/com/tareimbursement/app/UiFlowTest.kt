@@ -165,7 +165,9 @@ class UiFlowTest {
         assertTrue("generation failed: $job", job !is com.tareimbursement.app.service.JobState.Failed)
         rule.onNodeWithText("TA statement (Excel, PKF format)").assertExists()
         rule.onNodeWithText("Download").assertExists()
-        rule.onNodeWithText("E-mail").assertExists()
+        // No mail app on this test phone: E-mail is hidden, Share and Download remain.
+        rule.onNodeWithText("E-mail").assertDoesNotExist()
+        rule.onNodeWithText("Share").assertExists()
         rule.onNodeWithText("Mark completed & archive").performScrollTo().performClick()
         rule.onNodeWithText("Complete & archive").performClick()
         waitText("Mark reimbursed")

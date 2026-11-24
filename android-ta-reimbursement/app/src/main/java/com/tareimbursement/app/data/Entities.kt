@@ -165,7 +165,7 @@ data class AttachmentEntity(
     val addedAt: Long = System.currentTimeMillis(),
 ) {
     val kindEnum: AttachmentKind get() = runCatching { AttachmentKind.valueOf(kind) }.getOrDefault(AttachmentKind.OTHER)
-    val extension: String get() = originalName.substringAfterLast('.', "").lowercase().ifEmpty {
+    val extension: String get() = originalName.substringAfterLast('.', "").lowercase().takeIf { e -> e.length in 1..5 && e.all { it in 'a'..'z' || it in '0'..'9' } }.orEmpty().ifEmpty {
         when (kindEnum) { AttachmentKind.IMAGE -> "jpg"; AttachmentKind.PDF -> "pdf"; AttachmentKind.TEXT -> "txt"; AttachmentKind.VIDEO -> "mp4"; else -> "bin" }
     }
 }

@@ -5,9 +5,17 @@ Snap or upload your bills, review what the app reads from them, and get a submis
 documents**, and a **ZIP of receipts renamed `DDth Mon YYYY_Amount` and sorted by accounting head**.
 Everything is processed on the phone; the app has no internet permission.
 
-**Install:** copy `release/TA-Reimburse-v1.2.0.apk` to your phone, open it and allow
+**Install:** copy `release/TA-Reimburse-v1.3.0.apk` to your phone, open it and allow
 "Install unknown apps" for your file manager / browser when Android asks. Android 10 or newer.
-v1.2.0 installs over v1.0.0 / v1.1.0 and keeps existing claims (database upgraded automatically).
+v1.3.0 installs over any earlier version and keeps existing claims (database upgraded automatically).
+
+## What's new in 1.3.0
+
+- **E-mail fixed** – the app now finds the installed mail apps itself and opens one directly
+  (Gmail, Outlook…) with To / CC / subject / summary and all files attached (proper read grants for
+  Android 10+). If the phone has no mail app the E-mail button is hidden; Share and Download remain.
+- **Security hardening** (see below) and **crash-proofing**: guarded system pickers, tolerant
+  share-intent parsing, robust state restore on rotation, local error report in Settings.
 
 ## What's new in 1.2.0
 
@@ -88,6 +96,23 @@ v1.2.0 installs over v1.0.0 / v1.1.0 and keeps existing claims (database upgrade
 8. **Settings** – profile, optional per-bill policy limits per head, full **backup/restore** to a
    single ZIP, privacy note.
 
+## Security
+
+- No network permission at all (INTERNET removed, incl. ML Kit telemetry); Android cloud backup and
+  device-to-device transfer disabled; release build not debuggable, R8-shrunk, v2-signed.
+- Only one exported activity (launcher + Share-to). Incoming shares accept `content://` URIs from
+  other apps only — never `file://` or this app's own FileProvider (blocks "confused deputy" attempts
+  to import the app's private database or other claims).
+- FileProvider is not exported and exposes only `files/trips/` (claim bills & outputs),
+  `files/crash/` and `cache/camera/`; access is per-intent and read-only.
+- Untrusted file names are sanitised (extensions alphanumeric, ≤ 5 chars); per-file 200 MB and
+  per-ZIP 500 MB / 500-entry limits; ZIP-slip and nested-ZIP depth protection.
+- Backup restore accepts only the expected entries, checks size, SQLite integrity and schema version
+  before touching anything, and rolls back automatically if the restore fails.
+- Excel cells written from receipt text are always plain strings (no formula injection); PDF and XML
+  text is escaped.
+- Error report (Settings) contains only the stack trace and app/OS version — no claim data.
+
 ## Privacy
 
 - On-device OCR (Google ML Kit bundled model) – no images or text are uploaded.
@@ -98,7 +123,7 @@ v1.2.0 installs over v1.0.0 / v1.1.0 and keeps existing claims (database upgrade
 
 ```bash
 cd android-ta-reimbursement
-./gradlew :app:testDebugUnitTest   # 46 JVM + Robolectric tests (parser, Excel template, PDF, split, currency, travellers, OCR clean-up & voting, budget, migrations, workflows, UI)
+./gradlew :app:testDebugUnitTest   # 57 JVM + Robolectric tests (parser, Excel template, PDF, split, currency, travellers, OCR clean-up & voting, budget, migrations, security, e-mail intents, rotation/crash resilience, workflows, UI)
 ./gradlew :app:lintRelease
 ./gradlew :app:assembleRelease     # needs keystore.properties (not committed) or falls back to debug signing
 ```

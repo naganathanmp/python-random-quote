@@ -172,3 +172,10 @@ fun MoneyField(label: String, text: String, onChange: (String) -> Unit, modifier
 fun rememberToggle(initial: Boolean = false) = remember { mutableStateOf(initial) }
 
 val ColumnSpacing = Arrangement.spacedBy(12.dp)
+
+/** Runs an activity launch (picker, document saver…) without crashing if the phone lacks that system app. */
+fun safeLaunch(context: android.content.Context, block: () -> Unit) {
+    try { block() } catch (e: RuntimeException) {
+        android.widget.Toast.makeText(context, "No app available on this phone for this action.", android.widget.Toast.LENGTH_LONG).show()
+    }
+}

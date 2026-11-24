@@ -1,6 +1,6 @@
 package com.tareimbursement.app.service
 
-import android.content.ActivityNotFoundException
+import android.content.ClipData
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
@@ -24,41 +24,70 @@ object Sharing {
 
     /** Returns false when no app can open the file. */
     fun open(context: Context, file: File, mime: String = mimeOf(file)): Boolean {
-        val i = Intent(Intent.ACTION_VIEW).setDataAndType(uriFor(context, file), mime)
+        val uri = uriFor(context, file)
+        val i = Intent(Intent.ACTION_VIEW).setDataAndType(uri, mime)
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
-        return try { context.startActivity(Intent.createChooser(i, "Open with").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); true } catch (e: ActivityNotFoundException) { false }
+        i.clipData = ClipData.newRawUri(file.name, uri)
+        return try { context.startActivity(Intent.createChooser(i, "Open with").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); true } catch (e: RuntimeException) { false }
     }
 
-    fun share(context: Context, files: List<File>, subject: String, body: String) {
+    /** SEND / SEND_MULTIPLE with the files both as EXTRA_STREAM and as ClipData (needed for read grants). */
+    internal fun sendIntent(context: Context, files: List<File>, subject: String, body: String): Intent {
         val uris = ArrayList(files.map { uriFor(context, it) })
-        val i = Intent(if (uris.size == 1) Intent.ACTION_SEND else Intent.ACTION_SEND_MULTIPLE).apply {
+        return Intent(if (uris.size == 1) Intent.ACTION_SEND else Intent.ACTION_SEND_MULTIPLE).apply {
             type = if (files.size == 1) mimeOf(files[0]) else "*/*"
             if (uris.size == 1) putExtra(Intent.EXTRA_STREAM, uris[0]) else putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
             putExtra(Intent.EXTRA_SUBJECT, subject)
             putExtra(Intent.EXTRA_TEXT, body)
+            if (uris.isNotEmpty()) clipData = ClipData.newRawUri(files[0].name, uris[0]).also { c -> uris.drop(1).forEach { c.addItem(ClipData.Item(it)) } }
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
-        context.startActivity(Intent.createChooser(i, "Share TA claim").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 
-    /** Opens an e-mail app with the outputs attached and the approver pre-filled. */
-    fun email(context: Context, files: List<File>, to: List<String>, cc: List<String>, subject: String, body: String): Boolean {
-        val uris = ArrayList(files.map { uriFor(context, it) })
-        val i = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
-            type = "message/rfc822"
-            putExtra(Intent.EXTRA_EMAIL, to.filter { it.isNotBlank() }.toTypedArray())
-            if (cc.any { it.isNotBlank() }) putExtra(Intent.EXTRA_CC, cc.filter { it.isNotBlank() }.toTypedArray())
-            putExtra(Intent.EXTRA_SUBJECT, subject)
-            putExtra(Intent.EXTRA_TEXT, body)
-            putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            selector = Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:"))
+    /** Returns false if no app can receive the files. */
+    fun share(context: Context, files: List<File>, subject: String, body: String): Boolean = try {
+        context.startActivity(Intent.createChooser(sendIntent(context, files, subject, body), "Share TA claim").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); true
+    } catch (e: RuntimeException) { false }
+
+    /** Packages of installed e-mail apps (apps that handle mailto:) that can also receive attachments. */
+    fun emailApps(context: Context): List<String> {
+        val pm = context.packageManager
+        val mailers = pm.queryIntentActivities(Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:")), 0).map { it.activityInfo.packageName }.distinct()
+            .filter { it != context.packageName } // never ourselves (this app accepts shared files)
+        val probe = Intent(Intent.ACTION_SEND_MULTIPLE).setType("*/*")
+        val receivers = pm.queryIntentActivities(probe, 0).map { it.activityInfo.packageName }.toSet()
+        return mailers.filter { it in receivers || pm.queryIntentActivities(Intent(Intent.ACTION_SEND).setType("*/*").setPackage(it), 0).isNotEmpty() }
+    }
+
+    fun hasEmailApp(context: Context): Boolean = try { emailApps(context).isNotEmpty() } catch (e: RuntimeException) { false }
+
+    /** The e-mail intent for one mail app: recipients, subject, body and all files attached. */
+    internal fun emailIntent(context: Context, pkg: String, files: List<File>, to: List<String>, cc: List<String>, subject: String, body: String): Intent =
+        sendIntent(context, files, subject, body).apply {
+            if (files.size > 1) action = Intent.ACTION_SEND_MULTIPLE
+            putExtra(Intent.EXTRA_EMAIL, to.map { it.trim() }.filter { it.isNotBlank() }.toTypedArray())
+            cc.map { it.trim() }.filter { it.isNotBlank() }.takeIf { it.isNotEmpty() }?.let { putExtra(Intent.EXTRA_CC, it.toTypedArray()) }
+            setPackage(pkg)
         }
+
+    /**
+     * Opens the phone's e-mail app with the approver pre-filled and the outputs attached.
+     * Mail apps are found explicitly (instead of a mailto "selector", which several Android
+     * versions and Gmail builds ignore or open without attachments). With one mail app it opens
+     * directly; with several, the user picks one. Returns false if there is no mail app.
+     */
+    fun email(context: Context, files: List<File>, to: List<String>, cc: List<String>, subject: String, body: String): Boolean {
+        val apps = try { emailApps(context) } catch (e: RuntimeException) { emptyList() }
+        if (apps.isEmpty()) return false
+        val intents = apps.map { emailIntent(context, it, files, to, cc, subject, body) }
         return try {
-            context.startActivity(Intent.createChooser(i, "Send TA claim by e-mail").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); true
-        } catch (e: ActivityNotFoundException) {
-            // No mail app matched the mailto selector: fall back to a generic share sheet.
-            try { i.selector = null; context.startActivity(Intent.createChooser(i, "Send TA claim").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); true } catch (e2: ActivityNotFoundException) { false }
+            if (intents.size == 1) context.startActivity(intents[0].addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            else context.startActivity(
+                Intent.createChooser(intents[0], "Send TA claim with").putExtra(Intent.EXTRA_INITIAL_INTENTS, intents.drop(1).toTypedArray()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+            true
+        } catch (e: RuntimeException) {
+            share(context, files, subject, body)
         }
     }
 

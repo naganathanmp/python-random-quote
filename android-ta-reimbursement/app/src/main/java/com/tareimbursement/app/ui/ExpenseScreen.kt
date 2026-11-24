@@ -95,7 +95,8 @@ private val paymentModes = listOf("UPI", "Card", "Cash", "Net banking", "Wallet"
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun ExpenseScreen(expenseId: Long, nav: NavHostController) {
-    val c = LocalContext.current.container
+    val ctxForLaunch = LocalContext.current
+    val c = ctxForLaunch.container
     val scope = rememberCoroutineScope()
     val expense by remember(expenseId) { c.repo.expenses.observe(expenseId) }.collectAsState(initial = null)
     val atts by remember(expenseId) { c.repo.attachments.observeForExpense(expenseId) }.collectAsState(initial = emptyList())
@@ -268,7 +269,7 @@ fun ExpenseScreen(expenseId: Long, nav: NavHostController) {
                 if (!readOnly) item {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         OutlinedButton(onClick = supportCamera, modifier = Modifier.width(150.dp)) { Icon(Icons.Outlined.AddAPhoto, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Photo") }
-                        OutlinedButton(onClick = { supportPicker.launch(arrayOf("*/*")) }, modifier = Modifier.width(150.dp)) { Icon(Icons.Outlined.AttachFile, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Files") }
+                        OutlinedButton(onClick = { safeLaunch(ctxForLaunch) { supportPicker.launch(arrayOf("*/*")) } }, modifier = Modifier.width(150.dp)) { Icon(Icons.Outlined.AttachFile, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Files") }
                     }
                 }
             }
@@ -533,7 +534,7 @@ fun PickExpenseDialog(title: String, body: String, options: List<ExpenseEntity>,
 object ShareEdit {
     fun fromStored(s: String) = Shares.parse(s).entries.joinToString(";") { "${it.key}=${Fmt.amountInput(it.value)}" }
     fun equal(amount: Double, ids: List<Long>) = Shares.equal(amount, ids).entries.joinToString(";") { "${it.key}=${Fmt.amountInput(it.value)}" }
-    private fun entries(s: String) = s.split(';').filter { it.contains('=') }.map { it.substringBefore('=').toLong() to it.substringAfter('=') }
+    private fun entries(s: String) = s.split(';').filter { it.contains('=') }.mapNotNull { e -> e.substringBefore('=').toLongOrNull()?.let { it to e.substringAfter('=') } }
     fun values(s: String): Map<Long, Double> = entries(s).associate { it.first to (it.second.toDoubleOrNull() ?: 0.0) }
     fun has(s: String, id: Long) = entries(s).any { it.first == id }
     fun text(s: String, id: Long) = entries(s).firstOrNull { it.first == id }?.second.orEmpty()

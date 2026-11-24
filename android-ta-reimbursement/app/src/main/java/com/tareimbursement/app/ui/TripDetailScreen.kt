@@ -210,7 +210,7 @@ fun TripDetailScreen(tripId: Long, nav: NavHostController) {
                     FilledTonalButton(onClick = camera, modifier = Modifier.weight(1f).height(52.dp), enabled = importState !is JobState.Running) {
                         Icon(Icons.Outlined.CameraAlt, null); Spacer(Modifier.width(8.dp)); Text("Scan bill")
                     }
-                    FilledTonalButton(onClick = { picker.launch(arrayOf("*/*")) }, modifier = Modifier.weight(1f).height(52.dp), enabled = importState !is JobState.Running) {
+                    FilledTonalButton(onClick = { safeLaunch(ctx) { picker.launch(arrayOf("*/*")) } }, modifier = Modifier.weight(1f).height(52.dp), enabled = importState !is JobState.Running) {
                         Icon(Icons.Outlined.UploadFile, null); Spacer(Modifier.width(8.dp)); Text("Upload files")
                     }
                 }
