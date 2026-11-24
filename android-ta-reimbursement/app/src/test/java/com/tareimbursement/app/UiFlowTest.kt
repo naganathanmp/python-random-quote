@@ -90,10 +90,13 @@ class UiFlowTest {
         rule.onNodeWithText("Please fill the required fields (*).").assertExists() // client location is mandatory
         input("Client location visited *", "Hosur")
         input("Advance received (if any)", "2500")
+        input("Approved budget (optional)", "50000")
+        input("Daily spend limit (optional)", "3000")
         rule.onNodeWithText("Add co-traveller", substring = true).performScrollTo().performClick()
         input("Co-traveller name", "Anita Rao")
         rule.onNodeWithText("Create claim").performScrollTo().performClick()
-        waitText("No bills yet")
+        waitText("0% used")                       // budget card on the claim screen
+        waitText("No day is over the limit.")
         rule.onNodeWithText("Scan bill").assertExists()
         rule.onNodeWithText("Upload files").assertExists()
         val trips = runBlocking { app.container.repo.trips.all() }
@@ -101,6 +104,8 @@ class UiFlowTest {
         assertEquals(2500.0, trips[0].advance, 0.0)
         assertEquals("ACM01", trips[0].projectCode)
         assertEquals("Hosur", trips[0].location)
+        assertEquals(50000.0, trips[0].budget!!, 0.0)
+        assertEquals(3000.0, trips[0].dailyLimit!!, 0.0)
         assertEquals("Internal Audit", trips[0].purpose)
         assertEquals("Self Booking", trips[0].onwardBookedBy)
         val people = runBlocking { app.container.repo.travellers.forTrip(trips[0].id) }
@@ -152,7 +157,12 @@ class UiFlowTest {
         rule.onNodeWithText("Generate TA statement").performClick()
         waitText("Generate Excel, PDF & receipts")
         rule.onNodeWithText("Generate Excel, PDF & receipts").performScrollTo().performClick()
-        waitText("Mark completed & archive", 30_000)
+        rule.waitUntil(30_000) {
+            rule.onAllNodesWithText("Mark completed & archive", substring = true).fetchSemanticsNodes().isNotEmpty() ||
+                rule.onAllNodesWithText("Could not generate", substring = true).fetchSemanticsNodes().isNotEmpty()
+        }
+        val job = c.jobs.states.value[c.jobs.generateKey(tripId)]
+        assertTrue("generation failed: $job", job !is com.tareimbursement.app.service.JobState.Failed)
         rule.onNodeWithText("TA statement (Excel, PKF format)").assertExists()
         rule.onNodeWithText("Download").assertExists()
         rule.onNodeWithText("E-mail").assertExists()

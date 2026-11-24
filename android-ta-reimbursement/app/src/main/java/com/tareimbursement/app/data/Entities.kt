@@ -37,6 +37,11 @@ data class TripEntity(
     /** Template "To & Fro - Tickets booked": Self Booking / Office / Client. */
     @ColumnInfo(defaultValue = "'Self Booking'") val onwardBookedBy: String = "Self Booking",
     @ColumnInfo(defaultValue = "'Self Booking'") val returnBookedBy: String = "Self Booking",
+    /** Approved budget for the assignment (optional). */
+    val budget: Double? = null,
+    /** Optional daily spend limit, for the whole team or per traveller. */
+    val dailyLimit: Double? = null,
+    @ColumnInfo(defaultValue = "0") val dailyLimitPerPerson: Boolean = false,
 ) {
     val split: SplitMode get() = runCatching { SplitMode.valueOf(splitMode) }.getOrDefault(SplitMode.NONE)
     val startDate: LocalDate get() = LocalDate.ofEpochDay(startEpochDay)
@@ -194,6 +199,7 @@ data class TripWithStats(
     val paidAt: Long?,
     val paidAmount: Double?,
     val createdAt: Long,
+    val budget: Double?,
     val total: Double,
     val expenseCount: Int,
     val pendingCount: Int,

@@ -24,7 +24,7 @@ interface TripDao {
 
     @Query(
         """SELECT t.id, t.title, t.clientName, t.projectCode, t.location, t.startEpochDay, t.endEpochDay, t.advance, t.status,
-           t.claimNumber, t.submittedAt, t.paidAt, t.paidAmount, t.createdAt,
+           t.claimNumber, t.submittedAt, t.paidAt, t.paidAmount, t.createdAt, t.budget,
            COALESCE((SELECT SUM(e.amount) FROM expenses e WHERE e.tripId = t.id), 0) AS total,
            (SELECT COUNT(*) FROM expenses e WHERE e.tripId = t.id) AS expenseCount,
            (SELECT COUNT(*) FROM expenses e WHERE e.tripId = t.id AND e.confirmed = 0) AS pendingCount
@@ -91,7 +91,7 @@ interface BillingEntityDao {
 
 @Database(
     entities = [TripEntity::class, ExpenseEntity::class, AttachmentEntity::class, TripEventEntity::class, TravellerEntity::class, BillingEntity::class],
-    version = 2, exportSchema = true,
+    version = 3, exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun trips(): TripDao

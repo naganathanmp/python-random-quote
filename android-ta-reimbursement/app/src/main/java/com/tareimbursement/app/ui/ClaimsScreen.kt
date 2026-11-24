@@ -133,6 +133,14 @@ fun TripCard(t: TripWithStats, processing: Boolean, onClick: () -> Unit) {
                     Text("· ${t.pendingCount} to review", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.tertiary)
                 t.submittedAt?.let { if (t.claimStatus != ClaimStatus.DRAFT) Text("· submitted ${Fmt.date(com.tareimbursement.app.data.Repository.toDate(it))}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             }
+            t.budget?.takeIf { it > 0 }?.let { b ->
+                val level = com.tareimbursement.app.core.BudgetTracker.level(t.total, b)
+                val color = budgetColor(level)
+                Spacer(Modifier.height(8.dp))
+                LinearProgressIndicator(progress = { (t.total / b).toFloat().coerceIn(0f, 1f) }, color = color, trackColor = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.fillMaxWidth())
+                Text("Budget ${Fmt.inr(b)} · ${(t.total / b * 100).toInt()}% used" + if (level == com.tareimbursement.app.core.BudgetTracker.Level.OVER) " · over budget" else "",
+                    style = MaterialTheme.typography.labelSmall, color = color, modifier = Modifier.padding(top = 2.dp))
+            }
             if (processing) {
                 Spacer(Modifier.height(8.dp))
                 LinearProgressIndicator(Modifier.fillMaxWidth())

@@ -137,6 +137,8 @@ fun TripDetailScreen(tripId: Long, nav: NavHostController) {
     val trip by remember(tripId) { c.repo.trips.observe(tripId) }.collectAsState(initial = null)
     val expenses by remember(tripId) { c.repo.expenses.observeForTrip(tripId) }.collectAsState(initial = emptyList())
     val atts by remember(tripId) { c.repo.attachments.observeForTrip(tripId) }.collectAsState(initial = emptyList())
+    val people by remember(tripId) { c.repo.travellers.observeForTrip(tripId) }.collectAsState(initial = emptyList())
+    val budget by androidx.compose.runtime.produceState<com.tareimbursement.app.core.BudgetTracker.Status?>(null, expenses, trip, people) { value = c.repo.budgetStatus(tripId) }
     val jobs by c.jobs.states.collectAsState()
     val importState = jobs[c.jobs.importKey(tripId)]
     var menu by remember { mutableStateOf(false) }
@@ -202,6 +204,7 @@ fun TripDetailScreen(tripId: Long, nav: NavHostController) {
                     }
                 }
             }
+            budget?.let { b -> item { BudgetCard(b, people.associate { it.id to it.name }) } }
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     FilledTonalButton(onClick = camera, modifier = Modifier.weight(1f).height(52.dp), enabled = importState !is JobState.Running) {

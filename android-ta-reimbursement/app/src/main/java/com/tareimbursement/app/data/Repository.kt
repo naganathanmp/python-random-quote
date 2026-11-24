@@ -1,7 +1,9 @@
 package com.tareimbursement.app.data
 
 import androidx.room.withTransaction
+import com.tareimbursement.app.core.AmountWords
 import com.tareimbursement.app.core.BillingSplit
+import com.tareimbursement.app.core.BudgetTracker
 import com.tareimbursement.app.core.ClaimStatus
 import com.tareimbursement.app.core.Currencies
 import com.tareimbursement.app.core.Shares
@@ -295,7 +297,28 @@ class Repository(val db: AppDatabase, val filesDir: File) {
             if (limit != null && (e.amount ?: 0.0) > limit) out += ValidationIssue(e.id, "$label: ₹${e.amount} exceeds your policy limit of ₹$limit for ${e.categoryEnum!!.label}.", false)
             if (e.amount != null && abs(e.amount - Math.round(e.amount)) > 0.001) out += ValidationIssue(e.id, "$label: fractional amount ₹${e.amount} — file name uses ₹${Math.round(e.amount)}.", false)
         }
+        // Budget and daily limit (warnings only — the claim can still be submitted).
+        val b = budgetStatus(tripId)
+        if (b != null) {
+            if (b.level == BudgetTracker.Level.OVER) out += ValidationIssue(null, "Over budget: spent ${AmountWords.inr(b.spent)} against the approved ${AmountWords.inr(b.budget!!)} (${AmountWords.inr(-b.remaining!!)} over). Keep the partner's approval for the excess.", false)
+            val names = people.associate { it.id to it.name }
+            b.daysOver.forEach { d ->
+                val who = d.person?.let { names[it] }?.let { "$it: " }.orEmpty()
+                out += ValidationIssue(null, "${who}${d.date.format(DateTimeFormatter.ofPattern("dd MMM yyyy"))} spend ${AmountWords.inr(d.spent)} is above the daily limit of ${AmountWords.inr(d.limit)}.", false)
+            }
+        }
         return out
+    }
+
+    /** Budget vs actual and daily-limit status; null when the claim has neither. */
+    suspend fun budgetStatus(tripId: Long): BudgetTracker.Status? {
+        val t = trips.get(tripId) ?: return null
+        if ((t.budget ?: 0.0) <= 0 && (t.dailyLimit ?: 0.0) <= 0) return null
+        val multi = travellers.forTrip(tripId).size > 1
+        val spends = expenses.forTrip(tripId).filter { it.amount != null }.map {
+            BudgetTracker.Spend(it.date, it.amount!!, if (multi) Shares.parse(it.shares) else emptyMap())
+        }
+        return BudgetTracker.status(spends, t.budget, t.dailyLimit, t.dailyLimitPerPerson && multi, t.startDate, t.endDate)
     }
 
     suspend fun submit(tripId: Long) {
@@ -331,7 +354,7 @@ class Repository(val db: AppDatabase, val filesDir: File) {
     suspend fun insightData(): Pair<List<InsightTrip>, List<InsightExpense>> {
         val ts = trips.all().map { t ->
             InsightTrip(t.id, t.title, t.clientName, t.projectCode, t.startDate, t.endDate, t.claimStatus, t.advance,
-                t.submittedAt?.let { toDate(it) }, t.paidAt?.let { toDate(it) }, t.paidAmount)
+                t.submittedAt?.let { toDate(it) }, t.paidAt?.let { toDate(it) }, t.paidAmount, t.budget)
         }
         val es = expenses.all().filter { it.amount != null }.map {
             InsightExpense(it.tripId, it.date, it.amount!!, it.categoryEnum ?: it.suggestedEnum ?: ExpenseCategory.OTHER, it.vendor)

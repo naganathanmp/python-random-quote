@@ -16,7 +16,12 @@ data class InsightTrip(
     val id: Long, val title: String, val client: String, val projectCode: String,
     val start: LocalDate, val end: LocalDate, val status: ClaimStatus, val advance: Double,
     val submittedOn: LocalDate?, val paidOn: LocalDate?, val paidAmount: Double?,
+    val budget: Double? = null,
 )
+
+data class BudgetRow(val trip: InsightTrip, val spent: Double, val budget: Double) {
+    val used: Double get() = if (budget > 0) spent / budget else 0.0
+}
 
 data class InsightExpense(val tripId: Long, val date: LocalDate?, val amount: Double, val category: ExpenseCategory, val vendor: String)
 
@@ -46,6 +51,7 @@ data class Insights(
     val projects: List<ProjectStat>,
     val timeline: List<TimelineEntry>,
     val highlights: List<String>,
+    val budgets: List<BudgetRow> = emptyList(),
 )
 
 enum class InsightPeriod(val label: String) { ALL("All time"), THIS_YEAR("This year"), LAST_12_MONTHS("Last 12 months"), FY("This FY (Apr–Mar)") }
@@ -122,7 +128,13 @@ object InsightsEngine {
             TimelineEntry(t, totalByTrip[t.id] ?: 0.0, if (t.submittedOn != null && t.paidOn != null) t.paidOn.toEpochDay() - t.submittedOn.toEpochDay() else null)
         }
 
-        val highlights = buildHighlights(categories, exps, months, repeated, settlements, inTrips, totalByTrip, today, days)
+        val budgets = inTrips.filter { (it.budget ?: 0.0) > 0 }.map { BudgetRow(it, totalByTrip[it.id] ?: 0.0, it.budget!!) }.sortedByDescending { it.used }
+        val highlights = buildHighlights(categories, exps, months, repeated, settlements, inTrips, totalByTrip, today, days).toMutableList()
+        if (budgets.isNotEmpty()) {
+            val over = budgets.filter { it.spent > it.budget }
+            highlights.add(0, if (over.isEmpty()) "All ${budgets.size} budgeted claim(s) are within budget (${AmountWords.inr(budgets.sumOf { it.spent })} of ${AmountWords.inr(budgets.sumOf { it.budget })})."
+                else "${over.size} claim(s) over budget by ${AmountWords.inr(over.sumOf { it.spent - it.budget })} in total — e.g. ${over.first().trip.title} at ${(over.first().used * 100).toInt()}%.")
+        }
 
         val claimCount = inTrips.count { it.status != ClaimStatus.DRAFT }
         return Insights(
@@ -138,7 +150,7 @@ object InsightsEngine {
             averageSettlementDays = if (settlements.isNotEmpty()) settlements.average() else null,
             categories = categories, months = months, topVendors = topVendors, repeated = repeated,
             high = high.sortedByDescending { it.expense.amount }.take(10), projects = projects, timeline = timeline,
-            highlights = highlights,
+            highlights = highlights, budgets = budgets,
         )
     }
 

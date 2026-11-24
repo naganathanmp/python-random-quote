@@ -108,6 +108,20 @@ fun InsightsScreen(nav: NavHostController, modifier: Modifier) {
                 }
             }
         }
+        if (i.budgets.isNotEmpty()) item {
+            SectionCard(title = "Budget vs actual") {
+                i.budgets.take(10).forEach { b ->
+                    val level = com.tareimbursement.app.core.BudgetTracker.level(b.spent, b.budget)
+                    Column(Modifier.padding(vertical = 4.dp)) {
+                        Row {
+                            Text(b.trip.title, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text("${Fmt.inr(b.spent)} / ${Fmt.inr(b.budget)}", style = MaterialTheme.typography.labelMedium, color = budgetColor(level))
+                        }
+                        Bar(b.used.toFloat(), budgetColor(level))
+                    }
+                }
+            }
+        }
         item { SectionCard(title = "Monthly trend") { MonthlyBars(i) } }
         item {
             SectionCard(title = "Spend by accounting head") {

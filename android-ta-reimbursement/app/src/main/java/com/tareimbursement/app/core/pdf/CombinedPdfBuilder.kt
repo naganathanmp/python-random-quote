@@ -119,7 +119,7 @@ object CombinedPdfBuilder {
             }
             // table header
             pg.rect(M, y, right - M, 18f, fill = NAVY)
-            listOf("#", "Date", "Head", "Vendor / Particulars", "Amount", "Page").forEachIndexed { i, h ->
+            listOf("#", "Date", "Head", "Remarks", "Amount", "Page").forEachIndexed { i, h ->
                 pg.text(colX[i] + 3f, y + 12.5f, h, 8.5f, true, 0xFFFFFF)
             }
             y += 18f
@@ -131,7 +131,7 @@ object CombinedPdfBuilder {
                 pg.text(colX[0] + 3f, y + 11.5f, l.serial.toString(), 8.5f)
                 pg.text(colX[1] + 3f, y + 11.5f, l.date?.format(dmy) ?: "-", 8.5f)
                 pg.text(colX[2] + 3f, y + 11.5f, PdfWriter.fit(l.category.label, 8.5f, 124f), 8.5f)
-                pg.text(colX[3] + 3f, y + 11.5f, PdfWriter.fit(l.vendor.ifBlank { l.description }, 8.5f, 164f), 8.5f)
+                pg.text(colX[3] + 3f, y + 11.5f, PdfWriter.fit(remarksOf(l), 8.5f, 164f), 8.5f)
                 val amt = AmountWords.inr(l.amount)
                 pg.text(colX[5] - 6f - PdfWriter.textWidth(amt, 8.5f), y + 11.5f, amt, 8.5f)
                 pg.text(colX[5] + 3f, y + 11.5f, (firstPageOf[l.serial] ?: 0).toString(), 8.5f)
@@ -151,33 +151,44 @@ object CombinedPdfBuilder {
         }
     }
 
+    /** The mandatory "Remarks" of the annexure (falls back to the vendor only if remarks are empty). */
+    fun remarksOf(l: com.tareimbursement.app.core.StatementLine): String =
+        listOf(l.description.trim(), l.remarks.trim()).filter { it.isNotEmpty() }.joinToString(" – ").ifBlank { l.vendor.ifBlank { "-" } }
+
     private fun writeDocPage(pdf: PdfWriter, data: StatementData, p: Planned, n: Int, total: Int) {
         val pg = pdf.beginPage()
         val l = p.expense.line
         val right = PdfWriter.A4_W - M
-        pg.rect(M, 22f, right - M, 52f, fill = LIGHT)
         val head = "#${l.serial}   ${l.date?.let { FileNamer.formatDate(it) } ?: "Undated"}   |   ${l.category.label}"
-        pg.text(M + 8f, 37f, PdfWriter.fit(head, 10.5f, 380f, true), 10.5f, true, NAVY)
         val amt = AmountWords.inr(l.amount)
-        pg.text(right - 8f - PdfWriter.textWidth(amt, 12f, true), 38f, amt, 12f, true, NAVY)
-        val sub = buildString {
-            append(l.vendor.ifBlank { l.description.ifBlank { "-" } })
-            if (l.billNo.isNotBlank()) append("   |   Bill: ${l.billNo}")
+        val textW = right - M - 16f
+        // The mandatory remarks tell the reader what this invoice is for (up to 2 lines).
+        val remarkLines = PdfWriter.wrap("Remarks: " + remarksOf(l), 9.5f, textW, true).let { if (it.size > 2) listOf(it[0], PdfWriter.fit(it.drop(1).joinToString(" "), 9.5f, textW, true)) else it }
+        val details = buildString {
+            if (l.modeOfTravel.isNotBlank()) append("Mode: ${l.modeOfTravel}   |   ")
+            if (l.teamMembers.isNotBlank() && data.multiTraveller) append("Team: ${l.teamMembers}   |   ")
+            if (l.billNo.isNotBlank()) append("Bill: ${l.billNo}   |   ")
             if (p.attachment != null) {
-                append("   |   ${p.attachment.label} ${p.attIndex + 1}/${p.expense.attachments.size}")
+                append("${p.attachment.label} ${p.attIndex + 1}/${p.expense.attachments.size}")
                 if (p.pagesInAtt > 1) append(" (page ${p.pageInAtt}/${p.pagesInAtt})")
                 append(":  ${p.attachment.fileName}")
-            }
+            } else append("No bill")
         }
-        pg.text(M + 8f, 54f, PdfWriter.fit(sub, 8.5f, right - M - 16f), 8.5f, rgb = GREY)
         val extra = buildList {
             if (l.isForeign) add("${Currencies.format(l.foreignAmount!!, l.currency)} @ Rs. ${"%.4f".format(Locale.ENGLISH, l.exchangeRate ?: 0.0)}")
             if (l.entity.isNotBlank() && data.isSplit) add("Billed to: ${l.entity}")
-            if (data.multiTraveller && l.shares.isNotEmpty()) add("Shared: " + l.shares.joinToString(", ") { "${it.first} ${AmountWords.inr(it.second)}" })
+            if (data.multiTraveller && l.shares.isNotEmpty() && l.shares.map { it.second }.distinct().size > 1) add("Shares: " + l.shares.joinToString(", ") { "${it.first} ${AmountWords.inr(it.second)}" })
         }.joinToString("   |   ")
-        if (extra.isNotEmpty()) pg.text(M + 8f, 66f, PdfWriter.fit(extra, 8f, right - M - 16f), 8f, rgb = 0x1F3864)
+        val headerH = 30f + remarkLines.size * 12.5f + 12f + (if (extra.isNotEmpty()) 11f else 0f) + 4f
+        pg.rect(M, 22f, right - M, headerH, fill = LIGHT)
+        pg.text(M + 8f, 37f, PdfWriter.fit(head, 10.5f, 380f, true), 10.5f, true, NAVY)
+        pg.text(right - 8f - PdfWriter.textWidth(amt, 12f, true), 38f, amt, 12f, true, NAVY)
+        var hy = 54f
+        remarkLines.forEach { pg.text(M + 8f, hy, it, 9.5f, true, 0x202020); hy += 12.5f }
+        pg.text(M + 8f, hy, PdfWriter.fit(details, 8f, textW), 8f, rgb = GREY); hy += 11f
+        if (extra.isNotEmpty()) pg.text(M + 8f, hy, PdfWriter.fit(extra, 8f, textW), 8f, rgb = 0x1F3864)
 
-        val top = 84f; val bottom = PdfWriter.A4_H - 40f
+        val top = 22f + headerH + 10f; val bottom = PdfWriter.A4_H - 40f
         val areaW = right - M; val areaH = bottom - top
         when (val page = p.page) {
             is DocPage.Image -> {

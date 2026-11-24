@@ -32,5 +32,14 @@ object Migrations {
     const val TRAVELLERS_SQL = "CREATE TABLE IF NOT EXISTS `travellers` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `tripId` INTEGER NOT NULL, `name` TEXT NOT NULL, `employeeCode` TEXT NOT NULL, `isSelf` INTEGER NOT NULL, `sortOrder` INTEGER NOT NULL, FOREIGN KEY(`tripId`) REFERENCES `trips`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )"
     const val ENTITIES_SQL = "CREATE TABLE IF NOT EXISTS `billing_entities` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `tripId` INTEGER NOT NULL, `name` TEXT NOT NULL, `code` TEXT NOT NULL, `sharePercent` REAL NOT NULL, `sortOrder` INTEGER NOT NULL, FOREIGN KEY(`tripId`) REFERENCES `trips`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )"
 
-    val ALL = arrayOf(MIGRATION_1_2)
+    /** v1.1.0 → v1.2.0: budget and optional daily spend limit per claim. */
+    val MIGRATION_2_3 = object : Migration(2, 3) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE `trips` ADD COLUMN `budget` REAL")
+            db.execSQL("ALTER TABLE `trips` ADD COLUMN `dailyLimit` REAL")
+            db.execSQL("ALTER TABLE `trips` ADD COLUMN `dailyLimitPerPerson` INTEGER NOT NULL DEFAULT 0")
+        }
+    }
+
+    val ALL = arrayOf(MIGRATION_1_2, MIGRATION_2_3)
 }

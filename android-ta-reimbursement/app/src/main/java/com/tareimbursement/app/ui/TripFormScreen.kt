@@ -57,6 +57,9 @@ fun TripFormScreen(tripId: Long?, nav: NavHostController) {
     var onward by rememberSaveable { mutableStateOf("Self Booking") }
     var returnBy by rememberSaveable { mutableStateOf("Self Booking") }
     var comments by rememberSaveable { mutableStateOf("") }
+    var budget by rememberSaveable { mutableStateOf("") }
+    var dailyLimit by rememberSaveable { mutableStateOf("") }
+    var limitPerPerson by rememberSaveable { mutableStateOf(false) }
     var start by rememberSaveable { mutableStateOf<Long?>(LocalDate.now().toEpochDay()) }
     var end by rememberSaveable { mutableStateOf<Long?>(LocalDate.now().toEpochDay()) }
     var advance by rememberSaveable { mutableStateOf("") }
@@ -76,6 +79,7 @@ fun TripFormScreen(tripId: Long?, nav: NavHostController) {
                 start = t.startEpochDay; end = t.endEpochDay; advance = Fmt.amountInput(t.advance.takeIf { it > 0 })
                 currency = t.currency
                 onward = t.onwardBookedBy; returnBy = t.returnBookedBy; comments = t.notes
+                budget = Fmt.amountInput(t.budget); dailyLimit = Fmt.amountInput(t.dailyLimit); limitPerPerson = t.dailyLimitPerPerson
                 coTravellers = c.repo.travellers.forTrip(t.id).filter { !it.isSelf }.map { EditRow(it.id, it.name, it.employeeCode) }
                 val ents = c.repo.entities.forTrip(t.id)
                 splitOn = t.split != SplitMode.NONE
@@ -95,7 +99,11 @@ fun TripFormScreen(tripId: Long?, nav: NavHostController) {
         splitAuto && pcts.any { it > 0 } && (pcts.any { it <= 0 } || kotlin.math.abs(pcts.sum() - 100.0) > 0.5) -> "Percentages must be set for every entity and add up to 100 (now ${"%.1f".format(pcts.sum())})."
         else -> null
     }
-    val valid = title.isNotBlank() && client.isNotBlank() && code.isNotBlank() && location.isNotBlank() && purpose.isNotBlank() && start != null && end != null && !periodError && advanceValue != null && splitError == null
+    val budgetValue = if (budget.isBlank()) null else parseMoney(budget)
+    val dailyValue = if (dailyLimit.isBlank()) null else parseMoney(dailyLimit)
+    val budgetError = budget.isNotBlank() && budgetValue == null
+    val dailyError = dailyLimit.isNotBlank() && dailyValue == null
+    val valid = !budgetError && !dailyError && title.isNotBlank() && client.isNotBlank() && code.isNotBlank() && location.isNotBlank() && purpose.isNotBlank() && start != null && end != null && !periodError && advanceValue != null && splitError == null
 
     Scaffold(
         topBar = {
@@ -122,6 +130,14 @@ fun TripFormScreen(tripId: Long?, nav: NavHostController) {
                 DateField("To *", end?.let { LocalDate.ofEpochDay(it) }, { end = it.toEpochDay() }, Modifier.weight(1f), isError = periodError, supporting = if (periodError) "Before start" else null)
             }
             MoneyField("Advance received (if any)", advance, { advance = it }, isError = advanceValue == null, supporting = "Deducted to show the net amount payable / refundable.")
+            MoneyField("Approved budget (optional)", budget, { budget = it }, isError = budgetError,
+                supporting = "Overall amount approved by the partner — tracked against actual spend.")
+            MoneyField("Daily spend limit (optional)", dailyLimit, { dailyLimit = it }, isError = dailyError,
+                supporting = "Days that cross the limit are flagged.")
+            if (dailyLimit.isNotBlank() && coTravellers.any { it.a.isNotBlank() }) Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                androidx.compose.material3.Checkbox(limitPerPerson, { limitPerPerson = it })
+                Text("Limit applies per traveller (each person's share per day)", style = MaterialTheme.typography.bodyMedium)
+            }
             CurrencyDropdown(currency, { currency = it }, label = "Default bill currency",
                 modifier = Modifier.fillMaxWidth())
             if (currency != "INR") Text("New bills default to $currency; each bill can have its own currency and exchange rate. The statement is in ₹.",
@@ -170,7 +186,8 @@ fun TripFormScreen(tripId: Long?, nav: NavHostController) {
                         if (tripId == null) {
                             val id = c.repo.createTrip(TripEntity(title = title.trim(), clientName = client.trim(), projectCode = code.trim(), location = location.trim(), purpose = purpose.trim(),
                                 startEpochDay = start!!, endEpochDay = end!!, advance = advanceValue ?: 0.0, currency = currency,
-                                onwardBookedBy = onward, returnBookedBy = returnBy, notes = comments.trim()), profile.name, profile.employeeCode)
+                                onwardBookedBy = onward, returnBookedBy = returnBy, notes = comments.trim(),
+                                budget = budgetValue?.takeIf { it > 0 }, dailyLimit = dailyValue?.takeIf { it > 0 }, dailyLimitPerPerson = limitPerPerson), profile.name, profile.employeeCode)
                             saveExtras(c, id, profile.name, profile.employeeCode, coTravellers, splitOn, splitAuto, entityRows)
                             val shared = c.pendingShared.value
                             if (shared.isNotEmpty()) { c.jobs.startImport(id, shared); c.pendingShared.value = emptyList() }
@@ -179,7 +196,8 @@ fun TripFormScreen(tripId: Long?, nav: NavHostController) {
                             c.repo.trips.get(tripId)?.let { t ->
                                 c.repo.updateTrip(t.copy(title = title.trim(), clientName = client.trim(), projectCode = code.trim(), location = location.trim(), purpose = purpose.trim(),
                                     startEpochDay = start!!, endEpochDay = end!!, advance = advanceValue ?: 0.0, currency = currency,
-                                    onwardBookedBy = onward, returnBookedBy = returnBy, notes = comments.trim()))
+                                    onwardBookedBy = onward, returnBookedBy = returnBy, notes = comments.trim(),
+                                    budget = budgetValue?.takeIf { it > 0 }, dailyLimit = dailyValue?.takeIf { it > 0 }, dailyLimitPerPerson = limitPerPerson))
                                 saveExtras(c, t.id, profile.name, profile.employeeCode, coTravellers, splitOn, splitAuto, entityRows)
                             }
                             nav.popBackStack()

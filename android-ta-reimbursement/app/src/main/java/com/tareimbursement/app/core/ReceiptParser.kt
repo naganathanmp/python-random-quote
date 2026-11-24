@@ -77,7 +77,7 @@ object ReceiptParser {
 
     /** Fixes the most common OCR confusions in Indian receipts (₹ read as "Rs", "Z", "%" etc.). */
     internal fun normalise(text: String): String =
-        text.replace(' ', ' ')
+        fixDigitConfusions(text.replace(' ', ' '))
             .replace("₹", " ₹ ")
             .replace(Regex("(?i)\\bINR\\b"), " ₹ ")
             .replace(Regex("(?i)\\bRs\\.?\\s*"), " ₹ ")
@@ -85,6 +85,36 @@ object ReceiptParser {
             .replace(Regex("(?i)\\b(USD|EUR|GBP|AED|SAR|QAR|OMR|KWD|BHD|SGD|MYR|THB|IDR|JPY|CNY|HKD|AUD|NZD|CAD|CHF|ZAR|LKR|NPR|BDT|KES)\\b"), " ₹ ")
             .replace(Regex("[$€£¥฿]"), " ₹ ")
             .replace(Regex("[ \t]+"), " ")
+
+    /**
+     * Typical OCR misreads on blurred / faded bills:
+     *  - letters inside numbers: "6,2O5.0O" → "6,205.00", "1l5" → "115", "2S0" → "250"
+     *  - the ₹ sign read as "%", "Z", "?" or "2" glued to the amount after a total label
+     *  - spaces around decimal points / commas: "6 275 . 00" → "6275.00" when next to an amount label
+     */
+    internal fun fixDigitConfusions(text: String): String {
+        var t = text
+        // Letter look-alikes between digits (or a digit and . ,)
+        repeat(2) {
+            t = t.replace(Regex("(?<=[0-9.,])[Oo](?=[0-9.,])"), "0")
+                .replace(Regex("(?<=[0-9])[Oo](?=[/\\-][0-9Oo])"), "0")
+                .replace(Regex("(?<=[0-9][/\\-])[Oo](?=[0-9])"), "0")
+                .replace(Regex("(?<=[0-9])[lI|](?=[0-9.,])"), "1")
+                .replace(Regex("(?<=[0-9.,])[lI|](?=[0-9])"), "1")
+                .replace(Regex("(?<=[0-9])[S](?=[0-9])"), "5")
+                .replace(Regex("(?<=[0-9])[B](?=[0-9])"), "8")
+        }
+        // Trailing ".0O" / ".O0"
+        t = t.replace(Regex("(?<=[0-9])\\.[Oo0]{2}(?![0-9])")) { ".00" }
+        // ₹ misread as %, Z, ? or a stray "F" immediately before an amount
+        t = t.replace(Regex("(?<![A-Za-z0-9])[%Z?F]\\s?(?=[0-9][0-9,]*\\.[0-9]{2}(?![0-9]))"), "₹ ")
+        t = t.replace(Regex("(?<![A-Za-z0-9])[%Z]\\s?(?=[0-9]{2,})"), "₹ ")
+        // Broken decimals "1 250 . 00" after a total label
+        t = t.replace(Regex("(?i)((?:grand\\s+)?total|net amount|amount)([^0-9\\n]{0,12})([0-9]{1,3})\\s+([0-9]{3})\\s*\\.\\s*([0-9]{2})(?![0-9])")) { m ->
+            "${m.groupValues[1]}${m.groupValues[2]}${m.groupValues[3]}${m.groupValues[4]}.${m.groupValues[5]}"
+        }
+        return t
+    }
 
     internal fun findDates(lines: List<String>, tripStart: LocalDate?, tripEnd: LocalDate?, today: LocalDate): List<DateCandidate> {
         val out = mutableListOf<DateCandidate>()

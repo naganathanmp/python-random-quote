@@ -99,7 +99,9 @@ class FileImporter(
             } catch (e: Exception) {
                 skipped += "${s.name} (storage error)"; return@forEachIndexed
             }
-            val text = extractor.extract(stored, kind, type)
+            // Several readings (original + enhanced) are cross-checked; the best one is kept for display.
+            val fused = com.tareimbursement.app.core.ocr.OcrFusion.parse(extractor.extractReadings(stored, kind, type), trip.startDate, trip.endDate)
+            val text = fused?.second.orEmpty()
             val relPath = stored.relativeTo(repo.filesDir).path
             val mime = type.mime.takeIf { type != SniffedType.OTHER } ?: (MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "application/octet-stream")
             if (attachToExpenseId != null) {
@@ -109,7 +111,7 @@ class FileImporter(
                     repo.attachments.insert(AttachmentEntity(expenseId = target.id, tripId = tripId, storedPath = relPath, originalName = s.name, mimeType = mime, kind = kind.name, isPrimary = !hasPrimary, sizeBytes = stored.length()))
                     // Fill any still-missing fields from the supporting document.
                     if (text.isNotBlank() && (target.amount == null || target.dateEpochDay == null || target.vendor.isBlank())) {
-                        val p = ReceiptParser.parse(text, trip.startDate, trip.endDate)
+                        val p = fused!!.first
                         repo.expenses.update(target.copy(
                             amount = target.amount ?: p.amount.takeIf { !target.isForeign }, dateEpochDay = target.dateEpochDay ?: p.date?.toEpochDay(),
                             vendor = target.vendor.ifBlank { p.vendor.orEmpty() }, billNo = target.billNo.ifBlank { p.billNo.orEmpty() },
@@ -122,7 +124,7 @@ class FileImporter(
                     return@forEachIndexed
                 }
             }
-            val parsed = if (text.isNotBlank()) ReceiptParser.parse(text, trip.startDate, trip.endDate) else null
+            val parsed = fused?.first
             val expenseId = repo.createExpenseFromReceipt(tripId, parsed, text)
             if ((repo.expenses.get(expenseId)?.duplicateOfId ?: 0) > 0) duplicates++
             repo.attachments.insert(AttachmentEntity(expenseId = expenseId, tripId = tripId, storedPath = relPath, originalName = s.name, mimeType = mime, kind = kind.name, isPrimary = true, sizeBytes = stored.length()))

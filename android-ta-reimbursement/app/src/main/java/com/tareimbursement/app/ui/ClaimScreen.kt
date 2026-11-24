@@ -73,6 +73,8 @@ fun ClaimScreen(tripId: Long, nav: NavHostController) {
     val expenses by remember(tripId) { c.repo.expenses.observeForTrip(tripId) }.collectAsState(initial = emptyList())
     val atts by remember(tripId) { c.repo.attachments.observeForTrip(tripId) }.collectAsState(initial = emptyList())
     val events by remember(tripId) { c.repo.events.observeForTrip(tripId) }.collectAsState(initial = emptyList())
+    val people by remember(tripId) { c.repo.travellers.observeForTrip(tripId) }.collectAsState(initial = emptyList())
+    val budget by produceState<com.tareimbursement.app.core.BudgetTracker.Status?>(null, expenses, people) { value = c.repo.budgetStatus(tripId) }
     val jobs by c.jobs.states.collectAsState()
     var menu by remember { mutableStateOf(false) }
     var paidDialog by rememberSaveable { mutableStateOf(false) }
@@ -124,6 +126,7 @@ fun ClaimScreen(tripId: Long, nav: NavHostController) {
                     if (t.notes.isNotBlank()) Text(t.notes, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 6.dp))
                 }
             }
+            budget?.let { b -> item { BudgetCard(b, people.associate { it.id to it.name }) } }
             item {
                 when (t.claimStatus) {
                     ClaimStatus.SUBMITTED -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

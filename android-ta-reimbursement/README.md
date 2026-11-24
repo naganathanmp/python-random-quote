@@ -5,9 +5,25 @@ Snap or upload your bills, review what the app reads from them, and get a submis
 documents**, and a **ZIP of receipts renamed `DDth Mon YYYY_Amount` and sorted by accounting head**.
 Everything is processed on the phone; the app has no internet permission.
 
-**Install:** copy `release/TA-Reimburse-v1.1.0.apk` to your phone, open it and allow
+**Install:** copy `release/TA-Reimburse-v1.2.0.apk` to your phone, open it and allow
 "Install unknown apps" for your file manager / browser when Android asks. Android 10 or newer.
-v1.1.0 installs over v1.0.0 and keeps existing claims (database upgraded automatically).
+v1.2.0 installs over v1.0.0 / v1.1.0 and keeps existing claims (database upgraded automatically).
+
+## What's new in 1.2.0
+
+- **Better reading of unclear bills (still 100% on-device)** – small images are upscaled, the
+  right orientation is found, and each photo is read three ways (original, shadow-removed
+  high-contrast, sharpened black & white). Text boxes are rebuilt into printed rows so
+  "Grand Total … 830.00" stays together, common misreads are corrected (O→0, l→1, ₹ read as
+  % or Z, split decimals) and the readings vote: a value is marked confident only when the
+  readings agree, otherwise the field shows "Please verify".
+- **Budget per TA claim** – optional approved budget asked when creating the claim; budget vs
+  actual bar (used %, remaining / over), forecast at the current pace, budget chip on the claims
+  list, warning before submission when over budget, and a *Budget vs actual* section in Insights.
+- **Daily spend limit** (optional) – for the whole team or per traveller (using each person's
+  share); days over the limit are listed on the claim and before submission.
+- **PDF header shows the mandatory Remarks** (plus mode of travel) above every invoice, and the
+  index lists remarks instead of vendor.
 
 ## What's new in 1.1.0
 
@@ -82,7 +98,7 @@ v1.1.0 installs over v1.0.0 and keeps existing claims (database upgraded automat
 
 ```bash
 cd android-ta-reimbursement
-./gradlew :app:testDebugUnitTest   # 37 JVM + Robolectric tests (parser, Excel template, PDF, split, currency, travellers, migration, workflows, UI)
+./gradlew :app:testDebugUnitTest   # 46 JVM + Robolectric tests (parser, Excel template, PDF, split, currency, travellers, OCR clean-up & voting, budget, migrations, workflows, UI)
 ./gradlew :app:lintRelease
 ./gradlew :app:assembleRelease     # needs keystore.properties (not committed) or falls back to debug signing
 ```

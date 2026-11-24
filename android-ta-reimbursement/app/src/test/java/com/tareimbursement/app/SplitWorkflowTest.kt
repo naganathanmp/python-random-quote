@@ -198,6 +198,56 @@ class SplitWorkflowTest {
         assertTrue(annx.contains("Own Vehicle, including Toll charges ( Rammurthy nagar, BLR to Hosur ) 7.5 per km*134kms + 100 ( Toll )"))
         assertTrue(annx.contains("Anita joined directly from the Chennai client."))
         assertTrue(annx.contains("Mandatory Fields "))
+
+        // PDF invoice headers and index show the mandatory remarks, not just the vendor.
+        val pdfText = out.pdf.readBytes().toString(Charsets.ISO_8859_1)
+        assertTrue(pdfText.contains("Remarks: Own Vehicle, including Toll charges"))
+        assertTrue(pdfText.contains("Remarks: Hotel Mangalam bill"))
+        assertTrue(pdfText.contains("Mode: Car - Own"))
+
+        // Budget & daily limit: ₹2,205 spent of ₹2,000 budget, 21 Jul over a ₹1,000/day limit.
+        repo.updateTrip(repo.trips.get(tripId)!!.copy(budget = 2000.0, dailyLimit = 1000.0))
+        val b = repo.budgetStatus(tripId)!!
+        assertEquals(com.tareimbursement.app.core.BudgetTracker.Level.OVER, b.level)
+        assertEquals(listOf(LocalDate.of(2026, 7, 21)), b.daysOver.map { it.date })
+        val issues = repo.validate(tripId, emptyMap())
+        assertTrue(issues.any { !it.blocking && it.message.startsWith("Over budget") })
+        assertTrue(issues.any { !it.blocking && it.message.contains("above the daily limit") })
+        assertTrue("budget warnings never block submission", issues.none { it.blocking })
+        repo.updateTrip(repo.trips.get(tripId)!!.copy(budget = null, dailyLimit = null))
+        assertEquals(null, repo.budgetStatus(tripId))
+    }
+
+    /** A database created by v1.1.0 opens in v1.2.0 (budget fields added) with data intact. */
+    @Test fun migrationFrom2To3KeepsData() {
+        ctx.deleteDatabase("migrate2.db")
+        val schema = JSONObject(File("schemas/com.tareimbursement.app.data.AppDatabase/2.json").readText()).getJSONObject("database")
+        val path = ctx.getDatabasePath("migrate2.db").apply { parentFile?.mkdirs() }
+        SQLiteDatabase.openOrCreateDatabase(path, null).use { raw ->
+            val entities = schema.getJSONArray("entities")
+            for (i in 0 until entities.length()) {
+                val e = entities.getJSONObject(i)
+                raw.execSQL(e.getString("createSql").replace("\${TABLE_NAME}", e.getString("tableName")))
+                val idx = e.optJSONArray("indices")
+                if (idx != null) for (j in 0 until idx.length()) raw.execSQL(idx.getJSONObject(j).getString("createSql").replace("\${TABLE_NAME}", e.getString("tableName")))
+            }
+            val setup = schema.getJSONArray("setupQueries")
+            for (i in 0 until setup.length()) raw.execSQL(setup.getString(i))
+            raw.execSQL("INSERT INTO trips (id,title,clientName,projectCode,location,purpose,startEpochDay,endEpochDay,advance,status,claimNumber,createdAt,notes,currency,splitMode,onwardBookedBy,returnBookedBy) VALUES (1,'V11 trip','Client','P1','Hosur','Internal Audit',20000,20002,0,'DRAFT','TA-202407-001',0,'','AED','AUTO','Office','Self Booking')")
+            raw.execSQL("INSERT INTO travellers (id,tripId,name,employeeCode,isSelf,sortOrder) VALUES (1,1,'Ravi','E1',1,0)")
+            raw.version = 2
+        }
+        val migrated = androidx.room.Room.databaseBuilder(ctx, AppDatabase::class.java, "migrate2.db").addMigrations(*com.tareimbursement.app.data.Migrations.ALL).allowMainThreadQueries().build()
+        runBlocking {
+            val t = migrated.trips().get(1)!!
+            assertEquals("AED", t.currency); assertEquals(SplitMode.AUTO, t.split); assertEquals("Office", t.onwardBookedBy)
+            assertEquals(null, t.budget); assertEquals(null, t.dailyLimit); assertFalse(t.dailyLimitPerPerson)
+            assertEquals(1, migrated.travellers().forTrip(1).size)
+            migrated.trips().update(t.copy(budget = 50000.0, dailyLimit = 2500.0, dailyLimitPerPerson = true))
+            assertEquals(50000.0, migrated.trips().get(1)!!.budget!!, 0.0)
+        }
+        migrated.close()
+        ctx.deleteDatabase("migrate2.db")
     }
 
     @Test fun manualSplitRequiresAssignment() = runBlocking {
