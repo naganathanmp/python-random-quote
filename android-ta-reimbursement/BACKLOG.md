@@ -55,6 +55,15 @@ Status: **noted – not started** (waiting for the remaining feedback before bui
 - Limitation to communicate: apps like WhatsApp and screenshots remove metadata, so "no metadata"
   is not proof of a fake; findings are signals for review, not a verdict.
 
+## 6. One remarks field only
+- The expense screen currently has two remarks fields: "Remarks – mandatory" (the description) and
+  an extra "Remarks (shown in Annexure)". Remove the redundant extra field; keep only the mandatory
+  remarks.
+- Use that single mandatory remarks text everywhere: Excel annexure "Remarks -Mandatory" column,
+  combined PDF headers and index, per-entity statements, archive/expense views.
+- Migration: existing bills that have text in the old extra field get it appended to the mandatory
+  remarks once, so nothing already entered is lost.
+
 ## Release checklist for the next version
 - Update the interactive user guide (https://claude.ai/artifact/6joD8yvMhd77N3u6eSb56N) together
   with the release: new features (duplicate check, AI/fake detection & Trust check, provenance
