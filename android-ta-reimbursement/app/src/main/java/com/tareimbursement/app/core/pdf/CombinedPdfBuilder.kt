@@ -1,6 +1,7 @@
 package com.tareimbursement.app.core.pdf
 
 import com.tareimbursement.app.core.AmountWords
+import com.tareimbursement.app.core.Currencies
 import com.tareimbursement.app.core.FileNamer
 import com.tareimbursement.app.core.StatementData
 import com.tareimbursement.app.core.StatementLine
@@ -30,7 +31,7 @@ object CombinedPdfBuilder {
     private const val GREY = 0x595959
     private const val LIGHT = 0xDDEBF7
     private val dmy = DateTimeFormatter.ofPattern("dd-MMM-yyyy", Locale.ENGLISH)
-    private const val ROWS_FIRST = 26
+    private const val ROWS_FIRST = 23
     private const val ROWS_NEXT = 40
     private const val TEXT_LINES_PER_PAGE = 58
 
@@ -84,14 +85,17 @@ object CombinedPdfBuilder {
                 pg.text(M, 56f, "TA Claim - Invoices & Supporting Documents", 12f, false, 0xFFFFFF)
                 pg.text(M, 74f, "Claim No: ${c.claimNumber}    Prepared on: ${c.preparedOn.format(dmy)}", 9f, false, 0xDDEBF7)
                 y = 108f
-                val info = listOf(
-                    "Employee" to "${e.name} (${e.employeeCode})${if (e.designation.isNotBlank()) ", ${e.designation}" else ""}",
-                    "Client" to c.clientName,
-                    "Project / Assignment" to "${c.projectTitle}  [${c.projectCode}]",
-                    "Place of visit" to c.placeOfVisit,
-                    "Purpose" to c.purpose,
-                    "Period" to "${c.startDate.format(dmy)} to ${c.endDate.format(dmy)} (${data.days} days)",
-                )
+                val info = buildList {
+                    add("Employee" to "${e.name} (${e.employeeCode})${if (e.designation.isNotBlank()) ", ${e.designation}" else ""}")
+                    if (data.multiTraveller) add("Travellers" to data.travellers.joinToString(", ") { it.label })
+                    add("Client" to c.clientName)
+                    data.billedTo?.let { add("Billed to" to it.label) }
+                    if (data.isSplit) add("Billing split" to data.entities.joinToString("   ") { "${it.label}: ${AmountWords.inr(data.entityTotal(it.label))}" })
+                    add("Project / Assignment" to "${c.projectTitle}  [${data.billedTo?.code?.ifBlank { null } ?: c.projectCode}]")
+                    add("Place of visit" to c.placeOfVisit)
+                    add("Purpose" to c.purpose)
+                    add("Period" to "${c.startDate.format(dmy)} to ${c.endDate.format(dmy)} (${data.days} days)")
+                }
                 info.forEach { (k, v) ->
                     pg.text(M, y, k, 9f, true, GREY)
                     pg.text(M + 120f, y, PdfWriter.fit(v, 9.5f, right - M - 120f), 9.5f)
@@ -151,7 +155,7 @@ object CombinedPdfBuilder {
         val pg = pdf.beginPage()
         val l = p.expense.line
         val right = PdfWriter.A4_W - M
-        pg.rect(M, 22f, right - M, 40f, fill = LIGHT)
+        pg.rect(M, 22f, right - M, 52f, fill = LIGHT)
         val head = "#${l.serial}   ${l.date?.let { FileNamer.formatDate(it) } ?: "Undated"}   |   ${l.category.label}"
         pg.text(M + 8f, 37f, PdfWriter.fit(head, 10.5f, 380f, true), 10.5f, true, NAVY)
         val amt = AmountWords.inr(l.amount)
@@ -166,8 +170,14 @@ object CombinedPdfBuilder {
             }
         }
         pg.text(M + 8f, 54f, PdfWriter.fit(sub, 8.5f, right - M - 16f), 8.5f, rgb = GREY)
+        val extra = buildList {
+            if (l.isForeign) add("${Currencies.format(l.foreignAmount!!, l.currency)} @ Rs. ${"%.4f".format(Locale.ENGLISH, l.exchangeRate ?: 0.0)}")
+            if (l.entity.isNotBlank() && data.isSplit) add("Billed to: ${l.entity}")
+            if (data.multiTraveller && l.shares.isNotEmpty()) add("Shared: " + l.shares.joinToString(", ") { "${it.first} ${AmountWords.inr(it.second)}" })
+        }.joinToString("   |   ")
+        if (extra.isNotEmpty()) pg.text(M + 8f, 66f, PdfWriter.fit(extra, 8f, right - M - 16f), 8f, rgb = 0x1F3864)
 
-        val top = 74f; val bottom = PdfWriter.A4_H - 40f
+        val top = 84f; val bottom = PdfWriter.A4_H - 40f
         val areaW = right - M; val areaH = bottom - top
         when (val page = p.page) {
             is DocPage.Image -> {

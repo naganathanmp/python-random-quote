@@ -23,6 +23,8 @@ data class ParsedReceipt(
     val vendor: String?,
     val billNo: String?,
     val suggestion: CategorySuggestion,
+    /** Detected foreign currency code (e.g. "USD"); null = INR / not detected. */
+    val currency: String? = null,
 )
 
 /**
@@ -69,6 +71,7 @@ object ReceiptParser {
             vendor = vendor,
             billNo = findBillNo(lines),
             suggestion = suggestCategory(clean, vendor),
+            currency = Currencies.detect(text),
         )
     }
 
@@ -78,6 +81,9 @@ object ReceiptParser {
             .replace("₹", " ₹ ")
             .replace(Regex("(?i)\\bINR\\b"), " ₹ ")
             .replace(Regex("(?i)\\bRs\\.?\\s*"), " ₹ ")
+            // Foreign currency markers act as "currency" markers for amount detection too.
+            .replace(Regex("(?i)\\b(USD|EUR|GBP|AED|SAR|QAR|OMR|KWD|BHD|SGD|MYR|THB|IDR|JPY|CNY|HKD|AUD|NZD|CAD|CHF|ZAR|LKR|NPR|BDT|KES)\\b"), " ₹ ")
+            .replace(Regex("[$€£¥฿]"), " ₹ ")
             .replace(Regex("[ \t]+"), " ")
 
     internal fun findDates(lines: List<String>, tripStart: LocalDate?, tripEnd: LocalDate?, today: LocalDate): List<DateCandidate> {

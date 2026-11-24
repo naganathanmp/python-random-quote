@@ -86,7 +86,12 @@ class UiFlowTest {
         input("Project / assignment name *", "Stat Audit FY26")
         input("Client name *", "Acme Ltd")
         input("Project / engagement code *", "ACM01")
+        rule.onNodeWithText("Create claim").performScrollTo().performClick()
+        rule.onNodeWithText("Please fill the required fields (*).").assertExists() // client location is mandatory
+        input("Client location visited *", "Hosur")
         input("Advance received (if any)", "2500")
+        rule.onNodeWithText("Add co-traveller", substring = true).performScrollTo().performClick()
+        input("Co-traveller name", "Anita Rao")
         rule.onNodeWithText("Create claim").performScrollTo().performClick()
         waitText("No bills yet")
         rule.onNodeWithText("Scan bill").assertExists()
@@ -95,6 +100,12 @@ class UiFlowTest {
         assertEquals(1, trips.size)
         assertEquals(2500.0, trips[0].advance, 0.0)
         assertEquals("ACM01", trips[0].projectCode)
+        assertEquals("Hosur", trips[0].location)
+        assertEquals("Internal Audit", trips[0].purpose)
+        assertEquals("Self Booking", trips[0].onwardBookedBy)
+        val people = runBlocking { app.container.repo.travellers.forTrip(trips[0].id) }
+        assertEquals(listOf("Ravi Kumar", "Anita Rao"), people.map { it.name })
+        assertTrue(people.first().isSelf)
     }
 
     @Test fun reviewGenerateArchiveAndTrack() {
@@ -125,6 +136,7 @@ class UiFlowTest {
         rule.onNodeWithText("Uber").performClick()
         waitText("Accounting head *")
         rule.onNodeWithText("Nature of expense: Cab / auto / metro ride").assertExists()
+        rule.onNodeWithText("Cab - Uber").assertExists() // mandatory remarks pre-filled
         rule.onNodeWithText("Confirm").performClick()
         rule.onNodeWithText("Choose how this expense should be classified.").assertExists()
         rule.onNodeWithText("Local Conveyance  (suggested)").performScrollTo().performClick()
@@ -133,6 +145,8 @@ class UiFlowTest {
         val e = runBlocking { c.repo.expenses.get(expenseId)!! }
         assertTrue(e.confirmed)
         assertEquals(ExpenseCategory.LOCAL_CONVEYANCE, e.categoryEnum)
+        assertEquals("Car - Taxi", e.modeOfTravel)
+        assertEquals("Cab - Uber", e.description)
 
         // Generate outputs and archive.
         rule.onNodeWithText("Generate TA statement").performClick()
@@ -165,8 +179,8 @@ class UiFlowTest {
         waitText("Stat Audit")
         rule.onNodeWithText("Settings").performClick()
         waitText("Back up all data")
-        rule.onNodeWithText("Per-bill limits by accounting head").performClick()
-        waitText("Leave blank for no limit.")
+        rule.onNodeWithText("Per-bill limits & own-vehicle rate").performClick()
+        waitText("Per-bill limits — leave blank for no limit.")
         rule.onNodeWithText("Cancel").performClick()
     }
 }

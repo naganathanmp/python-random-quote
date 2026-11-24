@@ -53,5 +53,10 @@ class Prefs(context: Context) {
         _limits.value = readLimits()
     }
 
+    /** Default own-vehicle reimbursement rate per km (₹). */
+    var mileageRate: Double
+        get() = sp.getFloat("mileage_rate", 7.5f).toDouble()
+        set(v) { sp.edit().putFloat("mileage_rate", v.toFloat()).apply() }
+
     fun reload() { _profile.value = readProfile(); _limits.value = readLimits() }
 }

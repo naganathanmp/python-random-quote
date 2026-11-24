@@ -80,6 +80,11 @@ fun GenerateScreen(tripId: Long, nav: NavHostController) {
     val gen = jobs[c.jobs.generateKey(tripId)]
     var confirmArchive by rememberSaveable { mutableStateOf(false) }
     val issues by produceState<List<ValidationIssue>?>(null, expenses, limits) { value = c.repo.validate(tripId, limits) }
+    val entities by remember(tripId) { c.repo.entities.observeForTrip(tripId) }.collectAsState(initial = emptyList())
+    // Auto-split: preview the balanced allocation (stable: re-running changes nothing).
+    LaunchedEffect(expenses.size, expenses.sumOf { it.amount ?: 0.0 }, entities, trip?.splitMode) {
+        if (trip?.split == com.tareimbursement.app.data.SplitMode.AUTO) c.repo.autoAllocate(tripId)
+    }
     val t = trip
 
     // Outputs from an earlier run are shown if they exist and nothing changed since.
@@ -109,6 +114,17 @@ fun GenerateScreen(tripId: Long, nav: NavHostController) {
                 }
             }
 
+            if (t.split != com.tareimbursement.app.data.SplitMode.NONE && entities.size >= 2) SectionCard(title = "Billing split by client entity") {
+                entities.forEach { en ->
+                    val sum = expenses.filter { it.entityId == en.id }.sumOf { it.amount ?: 0.0 }
+                    val n = expenses.count { it.entityId == en.id }
+                    KeyValue(en.label, "${Fmt.inr(sum)} · $n bill${if (n == 1) "" else "s"}" + if (total > 0) " · ${"%.1f".format(sum / total * 100)}%" else "")
+                }
+                val unassigned = expenses.count { e -> entities.none { it.id == e.entityId } }
+                if (unassigned > 0) Text("$unassigned bill(s) not yet assigned.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                Text(if (t.split == com.tareimbursement.app.data.SplitMode.AUTO) "Auto split keeps every invoice whole; each entity gets its own statement and PDF."
+                     else "Assigned manually on each bill; each entity gets its own statement and PDF.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             if (issues == null) LinearProgressIndicator(Modifier.fillMaxWidth())
             if (blocking.isNotEmpty()) SectionCard(title = "Fix before generating") {
                 blocking.forEach { IssueRow(it, true) { it.expenseId?.let { id -> nav.navigate(Routes.expense(id)) } } }
@@ -208,7 +224,11 @@ fun OutputsPanel(c: AppContainer, t: TripEntity, outputs: ClaimOutputs) {
             Triple(outputs.excel, Icons.Outlined.TableChart, "TA statement (Excel, PKF format)"),
             Triple(outputs.pdf, Icons.Outlined.PictureAsPdf, "All invoices & supporting (single PDF)"),
             Triple(outputs.zip, Icons.Outlined.FolderZip, "Renamed receipts by head (ZIP)"),
-        ).forEach { (f, icon, label) -> OutputRow(f, icon, label) { if (!Sharing.open(ctx, f)) Toast.makeText(ctx, "No app installed to open ${f.extension.uppercase()} files", Toast.LENGTH_LONG).show() } }
+        ).plus(outputs.extras.map { f ->
+            val entity = f.nameWithoutExtension.substringAfter("${t.claimNumber}_", f.nameWithoutExtension)
+            if (f.extension.equals("xlsx", true)) Triple(f, Icons.Outlined.TableChart, "TA statement – $entity")
+            else Triple(f, Icons.Outlined.PictureAsPdf, "Invoices PDF – $entity")
+        }).forEach { (f, icon, label) -> OutputRow(f, icon, label) { if (!Sharing.open(ctx, f)) Toast.makeText(ctx, "No app installed to open ${f.extension.uppercase()} files", Toast.LENGTH_LONG).show() } }
         Spacer(Modifier.height(10.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilledTonalButton(onClick = {

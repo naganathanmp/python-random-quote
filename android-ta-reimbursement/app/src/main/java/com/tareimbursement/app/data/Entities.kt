@@ -1,5 +1,6 @@
 package com.tareimbursement.app.data
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
@@ -29,7 +30,15 @@ data class TripEntity(
     val paidAmount: Double? = null,
     val notes: String = "",
     val outputsGeneratedAt: Long? = null,
+    /** Default currency for new bills on this claim (foreign trips). */
+    @ColumnInfo(defaultValue = "'INR'") val currency: String = "INR",
+    /** Billing split across client entities: NONE, AUTO (balanced / by share %), MANUAL. */
+    @ColumnInfo(defaultValue = "'NONE'") val splitMode: String = SplitMode.NONE.name,
+    /** Template "To & Fro - Tickets booked": Self Booking / Office / Client. */
+    @ColumnInfo(defaultValue = "'Self Booking'") val onwardBookedBy: String = "Self Booking",
+    @ColumnInfo(defaultValue = "'Self Booking'") val returnBookedBy: String = "Self Booking",
 ) {
+    val split: SplitMode get() = runCatching { SplitMode.valueOf(splitMode) }.getOrDefault(SplitMode.NONE)
     val startDate: LocalDate get() = LocalDate.ofEpochDay(startEpochDay)
     val endDate: LocalDate get() = LocalDate.ofEpochDay(endEpochDay)
     val claimStatus: ClaimStatus get() = ClaimStatus.of(status)
@@ -64,11 +73,69 @@ data class ExpenseEntity(
     val amountConfident: Boolean = false,
     val ocrText: String = "",
     val createdAt: Long = System.currentTimeMillis(),
+    /** Bill currency. [amount] always holds the INR value; for foreign bills it is foreignAmount x exchangeRate. */
+    @ColumnInfo(defaultValue = "'INR'") val currency: String = "INR",
+    val foreignAmount: Double? = null,
+    val exchangeRate: Double? = null,
+    /** Client entity this bill is billed to (split claims). */
+    val entityId: Long? = null,
+    /** true = user fixed the entity; auto-allocation will not move it. */
+    @ColumnInfo(defaultValue = "0") val entityLocked: Boolean = false,
+    /** Traveller shares "travellerId=amount;..." in INR. Empty = whole amount to the claimant. */
+    @ColumnInfo(defaultValue = "''") val shares: String = "",
+    /** Template "Mode of travel-Mandatory". */
+    @ColumnInfo(defaultValue = "''") val modeOfTravel: String = "",
+    /** Own vehicle: amount = km × rate + toll. */
+    val mileageKm: Double? = null,
+    val mileageRate: Double? = null,
+    val tollAmount: Double? = null,
 ) {
+    val isMileage: Boolean get() = mileageKm != null && mileageRate != null
+    val isForeign: Boolean get() = currency != "INR"
     val date: LocalDate? get() = dateEpochDay?.let { LocalDate.ofEpochDay(it) }
     val categoryEnum: ExpenseCategory? get() = ExpenseCategory.fromName(category)
     val suggestedEnum: ExpenseCategory? get() = ExpenseCategory.fromName(suggestedCategory)
     val alternatives: List<ExpenseCategory> get() = suggestionAlternatives.split(',').mapNotNull { ExpenseCategory.fromName(it.trim()) }
+}
+
+enum class SplitMode(val label: String) {
+    NONE("Not split"), AUTO("Auto - balanced / by share %"), MANUAL("Manual - I assign each bill")
+}
+
+/** A person travelling on the claim; the TA claim covers everyone's expenses. */
+@Entity(
+    tableName = "travellers",
+    foreignKeys = [ForeignKey(entity = TripEntity::class, parentColumns = ["id"], childColumns = ["tripId"], onDelete = ForeignKey.CASCADE)],
+    indices = [Index("tripId")],
+)
+data class TravellerEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val tripId: Long,
+    val name: String,
+    val employeeCode: String = "",
+    /** The phone owner / claimant. */
+    val isSelf: Boolean = false,
+    val sortOrder: Int = 0,
+) {
+    val label: String get() = if (employeeCode.isBlank()) name else "$name ($employeeCode)"
+}
+
+/** A client entity / project code that part of the claim is billed to. */
+@Entity(
+    tableName = "billing_entities",
+    foreignKeys = [ForeignKey(entity = TripEntity::class, parentColumns = ["id"], childColumns = ["tripId"], onDelete = ForeignKey.CASCADE)],
+    indices = [Index("tripId")],
+)
+data class BillingEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val tripId: Long,
+    val name: String,
+    val code: String = "",
+    /** Target share of the claim in % (0 = equal split). */
+    val sharePercent: Double = 0.0,
+    val sortOrder: Int = 0,
+) {
+    val label: String get() = if (code.isBlank()) name else "$name [$code]"
 }
 
 enum class AttachmentKind { IMAGE, PDF, TEXT, VIDEO, OTHER }

@@ -5,8 +5,32 @@ Snap or upload your bills, review what the app reads from them, and get a submis
 documents**, and a **ZIP of receipts renamed `DDth Mon YYYY_Amount` and sorted by accounting head**.
 Everything is processed on the phone; the app has no internet permission.
 
-**Install:** copy `release/TA-Reimburse-v1.0.0.apk` to your phone, open it and allow
+**Install:** copy `release/TA-Reimburse-v1.1.0.apk` to your phone, open it and allow
 "Install unknown apps" for your file manager / browser when Android asks. Android 10 or newer.
+v1.1.0 installs over v1.0.0 and keeps existing claims (database upgraded automatically).
+
+## What's new in 1.1.0
+
+- **Excel in the firm's TRAVEL CLAIM template format** – sheets `TA CON-SHEET ` and
+  `Annexure-Breakup daywise`: client name, client location, nature of audit, team members,
+  audit start/end dates, total mandays, tickets booked by (onward/return), accounting numbers
+  (6535 Air Fare … 6595 Car Parking) with the template's exact head names and
+  `SUMIF('Annexure-Breakup daywise'!B:B, …)` totals, restricted heads greyed, advance,
+  balance to repay / receive, submission date, signature; annexure columns Date · Nature of
+  Expenditure · Amount · Sup Bills Y/N · Remarks (mandatory) · Mode of travel (mandatory) ·
+  Team members name · File Name, total, comments, mandatory-field notes and head guidance.
+- **All travellers on one claim** – add co-travellers; each bill records every person's share
+  (equal by default, editable) → "Team members name" column + a *Team member-wise* sheet.
+- **Billing split across client entities** (optional) – auto (balanced or by %, invoices never
+  split, bills can be fixed to an entity) or manual; consolidated statement with a split table
+  plus a separate statement & PDF per entity (advance pro-rated); ZIP has a folder per entity.
+- **Foreign currency** – INR default; per-bill currency, amount and exchange rate (remembered per
+  claim, auto-detected on receipts) → INR, shown as `ROUND(amount*rate,2)` with the conversion in
+  the remarks.
+- **Own vehicle (mileage)** entries – km × rate + toll, written as `=(134*7.5)+100` like the
+  template, Sup Bills = N; default rate per km in Settings.
+- **Mode of travel** suggested per bill (Car - Taxi, Auto, Metro, Bus, Food, Laundry…), mandatory
+  remarks pre-filled (e.g. "Meal - Hotel Mangalam").
 
 ## Workflow
 
@@ -30,10 +54,8 @@ Everything is processed on the phone; the app has no internet permission.
 5. **Generate TA statement** – blocking issues (missing amount/date/head, unreviewed bills) must be
    fixed; warnings (date outside travel period, duplicates, policy limits, fractional amounts,
    no bill) are shown for a final check. Outputs:
-   - `TA Statement_<claim>.xlsx` – **CON-SHEET** (claim header, 14 accounting heads via `SUMIF`
-     over the Annexure, total, less advance, net payable/refundable, amount in words, declaration,
-     sign-off block) and **Annexure** (itemised bills with date, bill no., vendor, head, amount,
-     renamed file reference, remarks).
+   - `TA Statement_<claim>.xlsx` – in the firm's TRAVEL CLAIM template format (see above); for
+     split claims also `TA Statement_<claim>_<entity code>.xlsx` per client entity.
    - `Invoices & Supporting_<claim>.pdf` – cover page with claim summary and an index of bills with
      page numbers, then every invoice/supporting page with a header strip (S.No · date · head · amount).
    - `Receipts_<claim>.zip` – category sub-folders with files renamed `15th Mar 2026_500.jpg`
@@ -60,7 +82,7 @@ Everything is processed on the phone; the app has no internet permission.
 
 ```bash
 cd android-ta-reimbursement
-./gradlew :app:testDebugUnitTest   # 25 JVM + Robolectric tests (parser, Excel, PDF, workflows, UI)
+./gradlew :app:testDebugUnitTest   # 37 JVM + Robolectric tests (parser, Excel template, PDF, split, currency, travellers, migration, workflows, UI)
 ./gradlew :app:lintRelease
 ./gradlew :app:assembleRelease     # needs keystore.properties (not committed) or falls back to debug signing
 ```

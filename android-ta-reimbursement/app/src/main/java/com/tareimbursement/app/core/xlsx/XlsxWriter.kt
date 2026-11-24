@@ -14,7 +14,7 @@ class XlsxWriter {
 
     enum class Style(val id: Int) {
         DEFAULT(0), TITLE(1), LABEL(2), TEXT(3), MONEY(4), HEADER(5), DATE(6), MONEY_BOLD(7),
-        TEXT_WRAP(8), CENTER(9), NOTE(10), BOLD(11), SUBTITLE(12), LABEL_BOLD_BORDER(13), CENTER_BOLD(14)
+        TEXT_WRAP(8), CENTER(9), NOTE(10), BOLD(11), SUBTITLE(12), LABEL_BOLD_BORDER(13), CENTER_BOLD(14), RATE(15)
     }
 
     sealed class Value {
@@ -25,9 +25,19 @@ class XlsxWriter {
         object Blank : Value()
     }
 
-    data class Cell(val value: Value, val style: Style)
+    data class Cell(val value: Value, val styleId: Int)
 
-    class Sheet(val name: String) {
+    /** Free-form cell style (deduplicated into styles.xml). Colours are RRGGBB. */
+    data class XStyle(
+        val font: String = "Arial", val size: Double = 10.0, val bold: Boolean = false, val italic: Boolean = false,
+        val color: String? = null, val fill: String? = null, val border: String? = null,
+        val numFmt: String? = null, val hAlign: String? = null, val vAlign: String? = "center", val wrap: Boolean = false,
+    )
+
+    private val custom = LinkedHashMap<XStyle, Int>()
+    fun style(x: XStyle): Int = custom.getOrPut(x) { BASE_XF_COUNT + custom.size }
+
+    inner class Sheet(val name: String) {
         internal val rows = sortedMapOf<Int, MutableMap<Int, Cell>>()
         internal val merges = mutableListOf<String>()
         internal val widths = mutableMapOf<Int, Double>()
@@ -37,8 +47,20 @@ class XlsxWriter {
         var landscape = false
 
         /** row and col are 1-based. */
-        fun set(row: Int, col: Int, value: Value, style: Style = Style.DEFAULT) {
-            rows.getOrPut(row) { sortedMapOf() }[col] = Cell(value, style)
+        fun set(row: Int, col: Int, value: Value, style: Style = Style.DEFAULT) = setId(row, col, value, style.id)
+        fun setId(row: Int, col: Int, value: Value, styleId: Int) {
+            rows.getOrPut(row) { sortedMapOf() }[col] = Cell(value, styleId)
+        }
+        fun set(row: Int, col: Int, value: Value, x: XStyle) = setId(row, col, value, style(x))
+        fun str(row: Int, col: Int, v: String?, x: XStyle) = set(row, col, if (v == null) Value.Blank else Value.Str(v), x)
+        fun num(row: Int, col: Int, v: Double, x: XStyle) = set(row, col, Value.Num(v), x)
+        fun date(row: Int, col: Int, v: LocalDate?, x: XStyle) = set(row, col, if (v == null) Value.Blank else Value.Date(v), x)
+        fun formula(row: Int, col: Int, f: String, cached: Double, x: XStyle) = set(row, col, Value.Formula(f, cached), x)
+        fun blank(row: Int, col: Int, x: XStyle) = set(row, col, Value.Blank, x)
+        /** Merges and gives every cell in the range the same style (so borders/fills cover the whole block). */
+        fun mergeStyled(row1: Int, col1: Int, row2: Int, col2: Int, x: XStyle) {
+            merges += "${ref(row1, col1)}:${ref(row2, col2)}"
+            for (r in row1..row2) for (c in col1..col2) if (rows[r]?.get(c) == null) blank(r, c, x)
         }
         fun str(row: Int, col: Int, v: String?, style: Style = Style.TEXT) = set(row, col, if (v == null) Value.Blank else Value.Str(v), style)
         fun num(row: Int, col: Int, v: Double, style: Style = Style.MONEY) = set(row, col, Value.Num(v), style)
@@ -73,7 +95,7 @@ class XlsxWriter {
 <Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Application>TA Reimbursement</Application></Properties>""")
         entry("xl/workbook.xml", workbook())
         entry("xl/_rels/workbook.xml.rels", workbookRels())
-        entry("xl/styles.xml", STYLES)
+        entry("xl/styles.xml", stylesXml())
         sheets.forEachIndexed { i, s -> entry("xl/worksheets/sheet${i + 1}.xml", sheetXml(s, i == 0)) }
         zip.finish()
         zip.flush()
@@ -135,7 +157,7 @@ class XlsxWriter {
             append(">")
             cells.forEach { (c, cell) ->
                 val ref = ref(r, c)
-                val st = cell.style.id
+                val st = cell.styleId
                 when (val v = cell.value) {
                     is Value.Str -> append("""<c r="$ref" s="$st" t="inlineStr"><is><t xml:space="preserve">${esc(v.v)}</t></is></c>""")
                     is Value.Num -> append("""<c r="$ref" s="$st"><v>${num(v.v)}</v></c>""")
@@ -159,7 +181,43 @@ class XlsxWriter {
         append("</worksheet>")
     }
 
+    private fun stylesXml(): String {
+        if (custom.isEmpty()) return STYLES
+        val fonts = mutableListOf<String>(); val fills = mutableListOf<String>(); val borders = mutableListOf<String>(); val fmts = LinkedHashMap<String, Int>()
+        val xfs = StringBuilder()
+        custom.keys.forEach { x ->
+            val font = "<font>${if (x.bold) "<b/>" else ""}${if (x.italic) "<i/>" else ""}<sz val=\"${x.size}\"/>${x.color?.let { "<color rgb=\"FF$it\"/>" } ?: ""}<name val=\"${esc(x.font)}\"/><family val=\"1\"/></font>"
+            var fontId = fonts.indexOf(font); if (fontId < 0) { fonts += font; fontId = fonts.size - 1 }
+            val fillId = x.fill?.let { rgb ->
+                val f = "<fill><patternFill patternType=\"solid\"><fgColor rgb=\"FF$rgb\"/><bgColor indexed=\"64\"/></patternFill></fill>"
+                var i = fills.indexOf(f); if (i < 0) { fills += f; i = fills.size - 1 }; BASE_FILLS + i
+            } ?: 0
+            val borderId = x.border?.let { b ->
+                val side = "style=\"$b\"><color rgb=\"FF000000\"/>"
+                val f = "<border><left $side</left><right $side</right><top $side</top><bottom $side</bottom><diagonal/></border>"
+                var i = borders.indexOf(f); if (i < 0) { borders += f; i = borders.size - 1 }; BASE_BORDERS + i
+            } ?: 0
+            val numId = x.numFmt?.let { nf -> fmts.getOrPut(nf) { 167 + fmts.size } } ?: 0
+            xfs.append("<xf numFmtId=\"$numId\" fontId=\"${BASE_FONTS + fontId}\" fillId=\"$fillId\" borderId=\"$borderId\" xfId=\"0\" applyNumberFormat=\"1\" applyFont=\"1\" applyFill=\"1\" applyBorder=\"1\" applyAlignment=\"1\">")
+            xfs.append("<alignment${x.hAlign?.let { " horizontal=\"$it\"" } ?: ""}${x.vAlign?.let { " vertical=\"$it\"" } ?: ""}${if (x.wrap) " wrapText=\"1\"" else ""}/></xf>")
+        }
+        var out = STYLES
+        out = out.replace(Regex("<numFmts count=\"3\">(.*?)</numFmts>")) { m ->
+            "<numFmts count=\"${3 + fmts.size}\">" + m.groupValues[1] + fmts.entries.joinToString("") { "<numFmt numFmtId=\"${it.value}\" formatCode=\"${esc(it.key)}\"/>" } + "</numFmts>"
+        }
+        out = out.replace("<fonts count=\"$BASE_FONTS\">", "<fonts count=\"${BASE_FONTS + fonts.size}\">").replace("</fonts>", fonts.joinToString("") + "</fonts>")
+        out = out.replace("<fills count=\"$BASE_FILLS\">", "<fills count=\"${BASE_FILLS + fills.size}\">").replace("</fills>", fills.joinToString("") + "</fills>")
+        out = out.replace("<borders count=\"$BASE_BORDERS\">", "<borders count=\"${BASE_BORDERS + borders.size}\">").replace("</borders>", borders.joinToString("") + "</borders>")
+        out = out.replace("<cellXfs count=\"$BASE_XF_COUNT\">", "<cellXfs count=\"${BASE_XF_COUNT + custom.size}\">").replace("</cellXfs>", xfs.toString() + "</cellXfs>")
+        return out
+    }
+
     companion object {
+        private const val BASE_FONTS = 6
+        private const val BASE_FILLS = 4
+        private const val BASE_BORDERS = 2
+        const val BASE_XF_COUNT = 16
+
         fun colName(col: Int): String {
             var c = col; val sb = StringBuilder()
             while (c > 0) { val m = (c - 1) % 26; sb.insert(0, ('A' + m)); c = (c - 1) / 26 }
@@ -186,7 +244,7 @@ class XlsxWriter {
         // Style ids must match the Style enum order.
         private val STYLES = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-<numFmts count="2"><numFmt numFmtId="164" formatCode="#,##0.00"/><numFmt numFmtId="165" formatCode="dd-mmm-yyyy"/></numFmts>
+<numFmts count="3"><numFmt numFmtId="164" formatCode="#,##0.00"/><numFmt numFmtId="165" formatCode="dd-mmm-yyyy"/><numFmt numFmtId="166" formatCode="0.0000"/></numFmts>
 <fonts count="6">
 <font><sz val="10"/><name val="Arial"/><family val="2"/></font>
 <font><b/><sz val="14"/><color rgb="FF1F3864"/><name val="Arial"/><family val="2"/></font>
@@ -200,7 +258,7 @@ class XlsxWriter {
 <fill><patternFill patternType="solid"><fgColor rgb="FFDDEBF7"/><bgColor indexed="64"/></patternFill></fill></fills>
 <borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border>$BORDER</borders>
 <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-<cellXfs count="15">
+<cellXfs count="16">
 <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
 <xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
 <xf numFmtId="0" fontId="2" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>
@@ -216,6 +274,7 @@ class XlsxWriter {
 <xf numFmtId="0" fontId="5" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
 <xf numFmtId="0" fontId="2" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="right" vertical="center"/></xf>
 <xf numFmtId="0" fontId="2" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+<xf numFmtId="166" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>
 </cellXfs>
 <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
 </styleSheet>"""

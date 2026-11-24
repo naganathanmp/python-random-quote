@@ -29,6 +29,7 @@ import androidx.compose.material.icons.outlined.CameraAlt
 import androidx.compose.material.icons.outlined.CarRental
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DirectionsBus
+import androidx.compose.material.icons.outlined.DirectionsCar
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.FlightTakeoff
 import androidx.compose.material.icons.outlined.Hotel
@@ -164,6 +165,10 @@ fun TripDetailScreen(tripId: Long, nav: NavHostController) {
                         DropdownMenuItem(text = { Text("Add expense without bill") }, leadingIcon = { Icon(Icons.Outlined.AddCircleOutline, null) }, onClick = {
                             menu = false
                             scope.launch(kotlinx.coroutines.Dispatchers.Main.immediate) { val id = c.repo.addManualExpense(tripId, t?.startDate); nav.navigate(Routes.expense(id)) }
+                        })
+                        DropdownMenuItem(text = { Text("Own vehicle trip (km × rate)") }, leadingIcon = { Icon(Icons.Outlined.DirectionsCar, null) }, onClick = {
+                            menu = false
+                            scope.launch(kotlinx.coroutines.Dispatchers.Main.immediate) { val id = c.repo.addMileageExpense(tripId, t?.startDate, c.prefs.mileageRate); nav.navigate(Routes.expense(id)) }
                         })
                         DropdownMenuItem(text = { Text("Delete claim") }, leadingIcon = { Icon(Icons.Outlined.Delete, null) }, onClick = { menu = false; confirmDelete = true })
                     }
@@ -314,6 +319,8 @@ fun ExpenseRow(e: ExpenseEntity, attachmentCount: Int, onClick: () -> Unit) {
             }
             Column(horizontalAlignment = Alignment.End) {
                 Text(Fmt.inr(e.amount), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = if (e.amount == null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
+                if (e.isForeign && e.foreignAmount != null) Text(com.tareimbursement.app.core.Currencies.format(e.foreignAmount, e.currency), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (e.isMileage) Text("Own vehicle", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (!e.confirmed && (e.amount == null || e.date == null)) Icon(Icons.Outlined.Warning, "Missing details", tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.size(18.dp))
             }
         }

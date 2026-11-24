@@ -87,7 +87,7 @@ fun SettingsScreen(nav: NavHostController, modifier: Modifier) {
         }
         item {
             SectionCard(title = "Policy limits") {
-                SettingRow(Icons.Outlined.Gavel, "Per-bill limits by accounting head", if (limits.isEmpty()) "None set — bills above a limit are flagged before you submit." else limits.entries.joinToString { "${it.key.shortLabel} ${Fmt.inr(it.value)}" }) { limitsOpen = true }
+                SettingRow(Icons.Outlined.Gavel, "Per-bill limits & own-vehicle rate", "Own vehicle ₹${Fmt.amountInput(c.prefs.mileageRate)}/km · " + if (limits.isEmpty()) "no per-bill limits set" else limits.entries.joinToString { "${it.key.shortLabel} ${Fmt.inr(it.value)}" }) { limitsOpen = true }
             }
         }
         item {
@@ -114,18 +114,21 @@ fun SettingsScreen(nav: NavHostController, modifier: Modifier) {
 
     if (limitsOpen) {
         val edits = remember { mutableStateMapOf<ExpenseCategory, String>().apply { ExpenseCategory.entries.forEach { put(it, Fmt.amountInput(limits[it])) } } }
+        var rateText by remember { mutableStateOf(Fmt.amountInput(c.prefs.mileageRate)) }
         AlertDialog(
             onDismissRequest = { limitsOpen = false },
-            title = { Text("Per-bill limits") },
+            title = { Text("Policy settings") },
             text = {
                 Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("Leave blank for no limit.", style = MaterialTheme.typography.bodySmall)
+                    MoneyField("Own vehicle rate per km", rateText, { rateText = it }, supporting = "Used for new own-vehicle trips (km × rate + toll).")
+                    Text("Per-bill limits — leave blank for no limit.", style = MaterialTheme.typography.bodySmall)
                     ExpenseCategory.entries.forEach { cat -> MoneyField(cat.label, edits[cat] ?: "", { edits[cat] = it }) }
                 }
             },
             confirmButton = {
                 TextButton(onClick = {
                     ExpenseCategory.entries.forEach { cat -> c.prefs.saveLimit(cat, parseMoney(edits[cat] ?: "")) }
+                    parseMoney(rateText)?.takeIf { it > 0 }?.let { c.prefs.mileageRate = it }
                     limitsOpen = false
                 }) { Text("Save") }
             },

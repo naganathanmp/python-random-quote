@@ -111,7 +111,7 @@ class FileImporter(
                     if (text.isNotBlank() && (target.amount == null || target.dateEpochDay == null || target.vendor.isBlank())) {
                         val p = ReceiptParser.parse(text, trip.startDate, trip.endDate)
                         repo.expenses.update(target.copy(
-                            amount = target.amount ?: p.amount, dateEpochDay = target.dateEpochDay ?: p.date?.toEpochDay(),
+                            amount = target.amount ?: p.amount.takeIf { !target.isForeign }, dateEpochDay = target.dateEpochDay ?: p.date?.toEpochDay(),
                             vendor = target.vendor.ifBlank { p.vendor.orEmpty() }, billNo = target.billNo.ifBlank { p.billNo.orEmpty() },
                             suggestedCategory = target.suggestedCategory ?: p.suggestion.category.name,
                             suggestionReason = target.suggestionReason.ifBlank { p.suggestion.reason },

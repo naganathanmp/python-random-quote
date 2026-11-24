@@ -69,17 +69,42 @@ interface EventDao {
     @Query("SELECT * FROM trip_events WHERE tripId = :tripId ORDER BY timestamp DESC, id DESC") suspend fun forTrip(tripId: Long): List<TripEventEntity>
 }
 
-@Database(entities = [TripEntity::class, ExpenseEntity::class, AttachmentEntity::class, TripEventEntity::class], version = 1, exportSchema = true)
+@Dao
+interface TravellerDao {
+    @Insert suspend fun insert(t: TravellerEntity): Long
+    @Update suspend fun update(t: TravellerEntity)
+    @Delete suspend fun delete(t: TravellerEntity)
+    @Query("SELECT * FROM travellers WHERE tripId = :tripId ORDER BY isSelf DESC, sortOrder, id") suspend fun forTrip(tripId: Long): List<TravellerEntity>
+    @Query("SELECT * FROM travellers WHERE tripId = :tripId ORDER BY isSelf DESC, sortOrder, id") fun observeForTrip(tripId: Long): Flow<List<TravellerEntity>>
+}
+
+@Dao
+interface BillingEntityDao {
+    @Insert suspend fun insert(e: BillingEntity): Long
+    @Update suspend fun update(e: BillingEntity)
+    @Delete suspend fun delete(e: BillingEntity)
+    @Query("SELECT * FROM billing_entities WHERE id = :id") suspend fun get(id: Long): BillingEntity?
+    @Query("SELECT * FROM billing_entities WHERE tripId = :tripId ORDER BY sortOrder, id") suspend fun forTrip(tripId: Long): List<BillingEntity>
+    @Query("SELECT * FROM billing_entities WHERE tripId = :tripId ORDER BY sortOrder, id") fun observeForTrip(tripId: Long): Flow<List<BillingEntity>>
+    @Query("UPDATE expenses SET entityId = NULL, entityLocked = 0 WHERE entityId = :entityId") suspend fun unassign(entityId: Long)
+}
+
+@Database(
+    entities = [TripEntity::class, ExpenseEntity::class, AttachmentEntity::class, TripEventEntity::class, TravellerEntity::class, BillingEntity::class],
+    version = 2, exportSchema = true,
+)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun trips(): TripDao
     abstract fun expenses(): ExpenseDao
     abstract fun attachments(): AttachmentDao
     abstract fun events(): EventDao
+    abstract fun travellers(): TravellerDao
+    abstract fun billingEntities(): BillingEntityDao
 
     companion object {
         const val NAME = "ta.db"
         fun build(context: Context): AppDatabase =
-            Room.databaseBuilder(context, AppDatabase::class.java, NAME).build()
+            Room.databaseBuilder(context, AppDatabase::class.java, NAME).addMigrations(*Migrations.ALL).build()
         fun inMemory(context: Context): AppDatabase =
             Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).allowMainThreadQueries().build()
     }

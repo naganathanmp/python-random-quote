@@ -79,7 +79,13 @@ import androidx.navigation.NavHostController
 import com.tareimbursement.app.container
 import com.tareimbursement.app.core.ExpenseCategory
 import com.tareimbursement.app.data.AttachmentEntity
+import com.tareimbursement.app.data.BillingEntity
 import com.tareimbursement.app.data.ExpenseEntity
+import com.tareimbursement.app.data.SplitMode
+import com.tareimbursement.app.data.TravellerEntity
+import com.tareimbursement.app.core.Currencies
+import com.tareimbursement.app.core.Shares
+import com.tareimbursement.app.core.TravelMode
 import com.tareimbursement.app.service.JobState
 import kotlinx.coroutines.launch
 import java.time.LocalDate
@@ -105,6 +111,11 @@ fun ExpenseScreen(expenseId: Long, nav: NavHostController) {
     var description by rememberSaveable { mutableStateOf("") }
     var category by rememberSaveable { mutableStateOf<String?>(null) }
     var payment by rememberSaveable { mutableStateOf("") }
+    var mode by rememberSaveable { mutableStateOf("") }
+    var km by rememberSaveable { mutableStateOf("") }
+    var perKm by rememberSaveable { mutableStateOf("") }
+    var toll by rememberSaveable { mutableStateOf("") }
+    var route by rememberSaveable { mutableStateOf("") }
     var remarks by rememberSaveable { mutableStateOf("") }
     var tried by rememberSaveable { mutableStateOf(false) }
     var showText by rememberSaveable { mutableStateOf(false) }
@@ -114,12 +125,29 @@ fun ExpenseScreen(expenseId: Long, nav: NavHostController) {
     var others by remember { mutableStateOf<List<ExpenseEntity>>(emptyList()) }
     var dupOf by remember { mutableStateOf<ExpenseEntity?>(null) }
     var readOnly by remember { mutableStateOf(false) }
+    // Foreign currency, billing entity and travellers' shares.
+    var currency by rememberSaveable { mutableStateOf("INR") }
+    var foreignAmt by rememberSaveable { mutableStateOf("") }
+    var rate by rememberSaveable { mutableStateOf("") }
+    var entityId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var shareText by rememberSaveable { mutableStateOf("") }
+    var sharesInit by rememberSaveable { mutableStateOf(false) }
+    var people by remember { mutableStateOf<List<TravellerEntity>>(emptyList()) }
+    var ents by remember { mutableStateOf<List<BillingEntity>>(emptyList()) }
+    var split by remember { mutableStateOf(SplitMode.NONE) }
 
     val e = expense
     LaunchedEffect(e?.id, e != null) {
         if (e != null && !loaded) {
-            date = e.dateEpochDay; amount = Fmt.amountInput(e.amount); vendor = e.vendor; billNo = e.billNo; description = e.description
+            date = e.dateEpochDay; amount = Fmt.amountInput(e.amount); vendor = e.vendor; billNo = e.billNo
+            description = e.description.ifBlank { TravelMode.defaultRemark(e.categoryEnum ?: e.suggestedEnum, e.nature, e.vendor) }
+            mode = e.modeOfTravel
+            km = Fmt.amountInput(e.mileageKm?.takeIf { it > 0 }); perKm = Fmt.amountInput(e.mileageRate); toll = Fmt.amountInput(e.tollAmount?.takeIf { it > 0 })
             category = e.category; payment = e.paymentMode; remarks = e.remarks
+            currency = e.currency; foreignAmt = Fmt.amountInput(e.foreignAmount); rate = e.exchangeRate?.let { Fmt.amountInput(it) }.orEmpty()
+            // Only a user-fixed entity is shown as chosen; auto-assigned bills show "Auto".
+            entityId = if (e.entityLocked) e.entityId else null
+            if (e.shares.isNotBlank()) { shareText = ShareEdit.fromStored(e.shares); sharesInit = true }
             loaded = true
         }
     }
@@ -127,7 +155,11 @@ fun ExpenseScreen(expenseId: Long, nav: NavHostController) {
         if (e == null) return@LaunchedEffect
         others = c.repo.expenses.forTrip(e.tripId).filter { it.id != e.id }
         dupOf = e.duplicateOfId?.takeIf { it > 0 }?.let { c.repo.expenses.get(it) }
-        readOnly = c.repo.trips.get(e.tripId)?.isArchived == true
+        val trip = c.repo.trips.get(e.tripId)
+        readOnly = trip?.isArchived == true
+        split = trip?.split ?: SplitMode.NONE
+        ents = c.repo.entities.forTrip(e.tripId)
+        people = c.repo.travellers.forTrip(e.tripId)
     }
     // If the expense was deleted / merged, leave the screen.
     var seen by remember { mutableStateOf(false) }
@@ -138,7 +170,25 @@ fun ExpenseScreen(expenseId: Long, nav: NavHostController) {
         if (uris.isNotEmpty()) e?.let { c.jobs.startImport(it.tripId, uris, it.id) }
     }
 
-    val amountValue = parseMoney(amount)
+    val isForeign = currency != "INR"
+    val foreignValue = parseMoney(foreignAmt)
+    val rateValue = rate.replace(",", "").toDoubleOrNull()?.takeIf { it > 0 }
+    val isMileage = e?.isMileage == true
+    val kmValue = km.replace(",", "").toDoubleOrNull()?.takeIf { it > 0 }
+    val perKmValue = perKm.replace(",", "").toDoubleOrNull()?.takeIf { it > 0 }
+    val tollValue = parseMoney(toll)
+    val amountValue = when {
+        isMileage -> if (kmValue != null && perKmValue != null) TravelMode.mileageAmount(kmValue, perKmValue, tollValue) else null
+        isForeign -> if (foreignValue != null && rateValue != null) Currencies.toInr(foreignValue, rateValue) else null
+        else -> parseMoney(amount)
+    }
+    val multi = people.size > 1
+    // Default: the bill is shared equally by everyone on the claim.
+    LaunchedEffect(people, loaded) {
+        if (loaded && multi && !sharesInit) { shareText = ShareEdit.equal(amountValue ?: 0.0, people.map { it.id }); sharesInit = true }
+    }
+    val shareMap = ShareEdit.values(shareText)
+    val sharesOk = !multi || (amountValue != null && shareMap.isNotEmpty() && Shares.isBalanced(shareMap, amountValue))
     val cat = ExpenseCategory.fromName(category)
     val dateValue = date?.let { LocalDate.ofEpochDay(it) }
     val limit = cat?.let { limits[it] }
@@ -147,6 +197,11 @@ fun ExpenseScreen(expenseId: Long, nav: NavHostController) {
         dateEpochDay = date, amount = amountValue?.let { Math.round(it * 100) / 100.0 }, vendor = vendor.trim(), billNo = billNo.trim(),
         description = description.trim(), category = category, paymentMode = payment, remarks = remarks.trim(),
         confirmed = if (confirm) true else e.confirmed && category != null && amountValue != null && date != null,
+        currency = currency, foreignAmount = if (isForeign) foreignValue else null, exchangeRate = if (isForeign) rateValue else null,
+        entityId = entityId, entityLocked = entityId != null,
+        shares = if (multi) Shares.format(shareMap) else "",
+        modeOfTravel = mode.trim().ifBlank { ExpenseCategory.fromName(category)?.let { TravelMode.suggest(it, e.ocrText, vendor) }.orEmpty() },
+        mileageKm = if (isMileage) kmValue ?: 0.0 else null, mileageRate = if (isMileage) perKmValue else null, tollAmount = if (isMileage) tollValue ?: 0.0 else null,
     )
 
     androidx.activity.compose.BackHandler(enabled = loaded && !readOnly && e != null) {
@@ -177,7 +232,14 @@ fun ExpenseScreen(expenseId: Long, nav: NavHostController) {
                     Button(
                         onClick = {
                             tried = true
-                            if (amountValue == null || amountValue <= 0 || date == null || category == null) return@Button
+                            // An untouched equal split follows amount changes automatically.
+                            if (multi && amountValue != null && !sharesOk && ShareEdit.isEqual(shareMap)) {
+                                shareText = ShareEdit.equal(amountValue, shareMap.keys.ifEmpty { people.map { it.id }.toSet() }.toList())
+                                return@Button
+                            }
+                            if (amountValue == null || amountValue <= 0 || date == null || category == null || !sharesOk || description.isBlank()) return@Button
+                            if (mode.isBlank()) { mode = TravelMode.suggest(ExpenseCategory.fromName(category), e?.ocrText.orEmpty(), vendor); if (mode.isBlank()) return@Button }
+                            if (split == SplitMode.MANUAL && ents.size >= 2 && ents.none { it.id == entityId }) return@Button
                             scope.launch(kotlinx.coroutines.Dispatchers.Main.immediate) {
                                 val updated = build(true) ?: return@launch
                                 c.repo.saveExpense(updated)
@@ -234,12 +296,53 @@ fun ExpenseScreen(expenseId: Long, nav: NavHostController) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 DateField("Bill date *", dateValue, { if (!readOnly) date = it.toEpochDay() }, Modifier.weight(1f), isError = tried && date == null,
                     supporting = if (!e.dateConfident && e.dateEpochDay != null && !e.confirmed) "Please verify" else null)
-                MoneyField("Amount *", amount, { if (!readOnly) amount = it }, Modifier.weight(1f), isError = (tried && (amountValue == null || amountValue <= 0)) || (amount.isNotBlank() && amountValue == null),
+                CurrencyDropdown(currency, { new ->
+                    if (new != currency) {
+                        // Switching INR <-> foreign: carry the typed number over.
+                        if (new != "INR" && currency == "INR") { foreignAmt = amount; scope.launch(kotlinx.coroutines.Dispatchers.Main.immediate) { rate = c.repo.lastRate(e.tripId, new)?.let { Fmt.amountInput(it) }.orEmpty() } }
+                        if (new == "INR" && currency != "INR") amount = Fmt.amountInput(amountValue)
+                        if (new != "INR" && currency != "INR") scope.launch(kotlinx.coroutines.Dispatchers.Main.immediate) { rate = c.repo.lastRate(e.tripId, new)?.let { Fmt.amountInput(it) } ?: rate }
+                        currency = new
+                    }
+                }, Modifier.weight(1f), enabled = !readOnly)
+            }
+            if (isMileage) {
+                Text("Own vehicle (no bill)", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+                OutlinedTextField(route, { route = it }, label = { Text("Route (e.g. Rammurthy Nagar, BLR to Hosur)") }, singleLine = true, readOnly = readOnly,
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words), modifier = Modifier.fillMaxWidth())
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(km, { v -> if (!readOnly && v.length <= 8 && v.all { it.isDigit() || it == '.' }) km = v }, label = { Text("Total km *") }, singleLine = true,
+                        isError = tried && kmValue == null, keyboardOptions = KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Decimal), modifier = Modifier.weight(1f))
+                    OutlinedTextField(perKm, { v -> if (!readOnly && v.length <= 6 && v.all { it.isDigit() || it == '.' }) perKm = v }, label = { Text("₹ per km *") }, singleLine = true,
+                        isError = tried && perKmValue == null, keyboardOptions = KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Decimal), modifier = Modifier.weight(1f))
+                    MoneyField("Toll", toll, { if (!readOnly) toll = it }, Modifier.weight(1f))
+                }
+                Text(if (amountValue != null) "= ${Fmt.inr(amountValue)}  (km × rate + toll; shown as a formula in the Annexure)" else "Enter km and rate per km.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                if (!readOnly && kmValue != null && perKmValue != null) TextButton(onClick = { description = TravelMode.mileageRemark(route.trim(), kmValue, perKmValue, tollValue) }) { Text("Fill remarks from these details") }
+            } else if (!isForeign) {
+                MoneyField("Amount *", amount, { if (!readOnly) amount = it }, isError = (tried && (amountValue == null || amountValue <= 0)) || (amount.isNotBlank() && amountValue == null),
                     supporting = when {
                         limit != null && (amountValue ?: 0.0) > limit -> "Above limit ${Fmt.inr(limit)}"
                         !e.amountConfident && e.amount != null && !e.confirmed -> "Please verify"
                         else -> null
                     })
+            } else {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedTextField(foreignAmt, { v -> if (!readOnly && v.length <= 14 && v.all { it.isDigit() || it == '.' || it == ',' }) foreignAmt = v },
+                        label = { Text("Amount in $currency *") }, prefix = { Text("$currency ") }, singleLine = true, readOnly = readOnly,
+                        isError = tried && foreignValue == null, keyboardOptions = KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Decimal),
+                        supportingText = if (!e.amountConfident && e.foreignAmount != null && !e.confirmed) { { Text("Please verify") } } else null,
+                        modifier = Modifier.weight(1f))
+                    OutlinedTextField(rate, { v -> if (!readOnly && v.length <= 12 && v.all { it.isDigit() || it == '.' }) rate = v },
+                        label = { Text("Rate: ₹ per 1 $currency *") }, singleLine = true, readOnly = readOnly, isError = tried && rateValue == null,
+                        keyboardOptions = KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Decimal), modifier = Modifier.weight(1f))
+                }
+                Text(
+                    if (amountValue != null) "= ${Fmt.inr(amountValue)} in the statement" + (if (limit != null && amountValue > limit) " · above limit ${Fmt.inr(limit)}" else "")
+                    else "Enter the amount and the exchange rate (e.g. from your card statement or forex receipt).",
+                    style = MaterialTheme.typography.bodySmall, color = if (amountValue != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
             OutlinedTextField(vendor, { vendor = it }, label = { Text("Vendor / particulars") }, singleLine = true, readOnly = readOnly,
                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words), modifier = Modifier.fillMaxWidth())
@@ -247,7 +350,8 @@ fun ExpenseScreen(expenseId: Long, nav: NavHostController) {
                 OutlinedTextField(billNo, { billNo = it }, label = { Text("Bill / invoice no.") }, singleLine = true, readOnly = readOnly, modifier = Modifier.weight(1f))
                 PaymentModeField(payment, { if (!readOnly) payment = it }, Modifier.weight(1f))
             }
-            OutlinedTextField(description, { description = it }, label = { Text("Description (e.g. Hotel to client office)") }, readOnly = readOnly,
+            OutlinedTextField(description, { description = it }, label = { Text("Remarks – mandatory (e.g. Uber Bangalore to Hosur)") }, readOnly = readOnly,
+                isError = tried && description.isBlank(), supportingText = if (tried && description.isBlank()) { { Text("Remarks are mandatory in the TA annexure") } } else null,
                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences), modifier = Modifier.fillMaxWidth())
 
             // --------------- accounting head
@@ -270,12 +374,54 @@ fun ExpenseScreen(expenseId: Long, nav: NavHostController) {
             val quick = (listOfNotNull(suggested) + e.alternatives).distinct()
             if (quick.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 quick.forEach { q ->
-                    FilterChip(selected = category == q.name, onClick = { if (!readOnly) category = q.name },
+                    FilterChip(selected = category == q.name, onClick = { if (!readOnly) { category = q.name; if (mode.isBlank()) mode = TravelMode.suggest(q, e.ocrText, vendor) } },
                         label = { Text(q.label + if (q == suggested) "  (suggested)" else "") }, leadingIcon = { Icon(categoryIcon(q), null, Modifier.size(18.dp)) })
                 }
             }
-            CategoryDropdown(cat, { if (!readOnly) category = it.name }, isError = tried && category == null)
+            CategoryDropdown(cat, { if (!readOnly) { category = it.name; if (mode.isBlank()) mode = TravelMode.suggest(it, e.ocrText, vendor) } }, isError = tried && category == null)
+            cat?.takeIf { it.restricted }?.let { Text("Note: ${it.guidance.trim()}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary) }
+            ModeOfTravelField(mode, { if (!readOnly) mode = it }, isError = tried && mode.isBlank() && category != null && TravelMode.suggest(ExpenseCategory.fromName(category), e.ocrText, vendor).isBlank())
             if (tried && category == null) Text("Choose how this expense should be classified.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+
+            if (split != SplitMode.NONE && ents.size >= 2) {
+                HorizontalDivider()
+                Text("Billed to client entity" + if (split == SplitMode.MANUAL) " *" else "", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (split == SplitMode.AUTO) FilterChip(entityId == null, { if (!readOnly) entityId = null }, label = { Text("Auto (balanced)") })
+                    ents.forEach { en -> FilterChip(entityId == en.id, { if (!readOnly) entityId = en.id }, label = { Text(en.label) }) }
+                }
+                if (split == SplitMode.MANUAL && tried && ents.none { it.id == entityId }) Text("Choose the entity this bill is billed to.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                if (split == SplitMode.AUTO) Text("Auto: the app balances bills across entities when you generate. Pick an entity to fix this bill to it.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+
+            if (multi) {
+                HorizontalDivider()
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Travellers' shares", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
+                    if (!readOnly) TextButton(onClick = {
+                        val ids = shareMap.keys.ifEmpty { people.map { it.id }.toSet() }.toList()
+                        shareText = ShareEdit.equal(amountValue ?: 0.0, people.map { it.id }.filter { it in ids })
+                    }) { Text("Split equally") }
+                }
+                people.forEach { pe ->
+                    val included = ShareEdit.has(shareText, pe.id)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        androidx.compose.material3.Checkbox(included, { on ->
+                            if (readOnly) return@Checkbox
+                            val ids = (if (on) shareMap.keys + pe.id else shareMap.keys - pe.id).let { set -> people.map { it.id }.filter { it in set } }
+                            shareText = ShareEdit.equal(amountValue ?: 0.0, ids)
+                        })
+                        Text(pe.label + if (pe.isSelf) " (you)" else "", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                        if (included) OutlinedTextField(ShareEdit.text(shareText, pe.id), { v -> if (!readOnly && v.length <= 12 && v.all { it.isDigit() || it == '.' }) shareText = ShareEdit.set(shareText, pe.id, v) },
+                            prefix = { Text("₹ ") }, singleLine = true, readOnly = readOnly, modifier = Modifier.width(140.dp),
+                            keyboardOptions = KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Decimal))
+                    }
+                }
+                val sum = shareMap.values.sum()
+                Text("Shares total ${Fmt.inr(sum)} of ${Fmt.inr(amountValue)}" + if (!sharesOk && amountValue != null) " — must match the bill amount" else "",
+                    style = MaterialTheme.typography.bodySmall, color = if (sharesOk) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error)
+            }
 
             OutlinedTextField(remarks, { remarks = it }, label = { Text("Remarks (shown in Annexure)") }, readOnly = readOnly, modifier = Modifier.fillMaxWidth())
 
@@ -381,4 +527,30 @@ fun PickExpenseDialog(title: String, body: String, options: List<ExpenseEntity>,
         confirmButton = {},
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
+}
+
+/** Editable traveller shares kept as text "id=value;…" so partially typed numbers survive. */
+object ShareEdit {
+    fun fromStored(s: String) = Shares.parse(s).entries.joinToString(";") { "${it.key}=${Fmt.amountInput(it.value)}" }
+    fun equal(amount: Double, ids: List<Long>) = Shares.equal(amount, ids).entries.joinToString(";") { "${it.key}=${Fmt.amountInput(it.value)}" }
+    private fun entries(s: String) = s.split(';').filter { it.contains('=') }.map { it.substringBefore('=').toLong() to it.substringAfter('=') }
+    fun values(s: String): Map<Long, Double> = entries(s).associate { it.first to (it.second.toDoubleOrNull() ?: 0.0) }
+    fun has(s: String, id: Long) = entries(s).any { it.first == id }
+    fun text(s: String, id: Long) = entries(s).firstOrNull { it.first == id }?.second.orEmpty()
+    fun set(s: String, id: Long, v: String) = entries(s).joinToString(";") { if (it.first == id) "$id=$v" else "${it.first}=${it.second}" }
+    fun isEqual(m: Map<Long, Double>) = m.isNotEmpty() && (m.values.max() - m.values.min()) <= 0.011
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ModeOfTravelField(value: String, onChange: (String) -> Unit, isError: Boolean) {
+    var open by remember { mutableStateOf(false) }
+    ExposedDropdownMenuBox(open, { open = it }) {
+        OutlinedTextField(value, onChange, label = { Text("Mode of travel – mandatory") }, singleLine = true, isError = isError,
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(open) },
+            modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryEditable))
+        ExposedDropdownMenu(open, { open = false }) {
+            TravelMode.options.forEach { m -> DropdownMenuItem(text = { Text(m) }, onClick = { onChange(m); open = false }) }
+        }
+    }
 }
