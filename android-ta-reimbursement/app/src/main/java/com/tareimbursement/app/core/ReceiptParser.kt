@@ -25,6 +25,12 @@ data class ParsedReceipt(
     val suggestion: CategorySuggestion,
     /** Detected foreign currency code (e.g. "USD"); null = INR / not detected. */
     val currency: String? = null,
+    /** Short remarks written by the on-device AI (pre-fills the mandatory remarks). */
+    val aiRemarks: String? = null,
+    /** Mode of travel suggested by the on-device AI. */
+    val aiMode: String? = null,
+    /** true when the date came from the file's metadata, not from the printed bill. */
+    val dateFromMetadata: Boolean = false,
 )
 
 /**

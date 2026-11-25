@@ -91,6 +91,12 @@ dependencies {
     implementation("com.google.mlkit:text-recognition:16.0.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.9.0")
+    // On-device LLM (Qwen 2.5 / Gemma 3n) via MediaPipe LLM Inference
+    implementation("com.google.mediapipe:tasks-genai:0.10.29")
+    // Background model download and team sync
+    implementation("androidx.work:work-runtime-ktx:2.10.0")
+    // Digital signatures (CMS / PAdES) for generated documents
+    implementation("org.bouncycastle:bcpkix-jdk18on:1.78.1")
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 
@@ -101,4 +107,6 @@ dependencies {
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
     testImplementation(composeBom)
     testImplementation("androidx.compose.ui:ui-test-junit4")
+    testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
+    testImplementation("androidx.work:work-testing:2.10.0")
 }
