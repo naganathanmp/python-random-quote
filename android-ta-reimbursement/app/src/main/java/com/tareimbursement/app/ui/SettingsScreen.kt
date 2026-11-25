@@ -1,5 +1,8 @@
 package com.tareimbursement.app.ui
 
+import androidx.compose.material.icons.outlined.Group
+import androidx.compose.material.icons.outlined.Verified
+
 import android.content.Intent
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -87,6 +90,13 @@ fun SettingsScreen(nav: NavHostController, modifier: Modifier) {
             }
         }
         item { AiSettingsCard() }
+        item {
+            SectionCard(title = "Team & documents") {
+                SettingRow(Icons.Outlined.Group, "Team sharing",
+                    c.supabase.session?.let { "Signed in as ${it.contact}" } ?: "Share projects with your team, sync bills and chat") { nav.navigate(Routes.ACCOUNT) }
+                SettingRow(Icons.Outlined.Verified, "Verify a document", "Check the digital signature of a TA statement PDF or Excel") { nav.navigate(Routes.VERIFY) }
+            }
+        }
         item {
             SectionCard(title = "Policy limits") {
                 SettingRow(Icons.Outlined.Gavel, "Per-bill limits & own-vehicle rate", "Own vehicle ₹${Fmt.amountInput(c.prefs.mileageRate)}/km · " + if (limits.isEmpty()) "no per-bill limits set" else limits.entries.joinToString { "${it.key.shortLabel} ${Fmt.inr(it.value)}" }) { limitsOpen = true }

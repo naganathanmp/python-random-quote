@@ -218,7 +218,8 @@ class WorkflowTest {
         val prepared = exporter.prepare(tripId, employee)
         assertEquals(6, prepared.data.lines.size)
         assertEquals(6275.0 + 500 + 4500 + 820.16 + 504 + 150, prepared.data.total, 0.001)
-        assertEquals("No bill – self-declared", prepared.data.lines.first { it.description == "Porter charges" }.remarks)
+        // v2.0: one remarks field everywhere - a missing bill shows as "Sup Bills = N", not as an extra remark.
+        prepared.data.lines.first { it.description == "Porter charges" }.let { assertEquals("", it.remarks); assertFalse(it.billAvailable) }
         assertEquals(LocalDate.of(2026, 3, 24), prepared.data.lines.first().date)
 
         // ---- submit (archive) and track approval & payment

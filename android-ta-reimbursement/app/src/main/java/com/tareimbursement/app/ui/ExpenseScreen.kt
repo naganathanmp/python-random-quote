@@ -167,8 +167,9 @@ fun ExpenseScreen(expenseId: Long, nav: NavHostController) {
         others = c.repo.expenses.forTrip(e.tripId).filter { it.id != e.id }
         dupOf = e.duplicateOfId?.takeIf { it > 0 }?.let { c.repo.expenses.get(it) }
         val trip = c.repo.trips.get(e.tripId)
-        readOnly = trip?.isArchived == true
         tripShared = trip?.shared == true
+        // Team members edit only their own bills (the server enforces the same rule).
+        readOnly = trip?.isArchived == true || (tripShared && trip?.myRole == "MEMBER" && e.addedByUid != c.supabase.session?.userId)
         split = trip?.split ?: SplitMode.NONE
         ents = c.repo.entities.forTrip(e.tripId)
         people = c.repo.travellers.forTrip(e.tripId)

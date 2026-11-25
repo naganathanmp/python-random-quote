@@ -105,6 +105,21 @@ class SyncEngine(
         }
     }
 
+    /**
+     * Removes a team project from this phone. The owner also closes it on the server (members keep
+     * their copy, marked as removed); a member just stops receiving it here.
+     */
+    suspend fun forget(tripId: Long) = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            val t = repo.trips.get(tripId) ?: return@withLock
+            cursors.put("hidden:${t.uid}", "1")
+            cursors.clear("${t.uid}:")
+            if (t.shared && t.myRole == "OWNER" && client.signedIn) {
+                try { client.upsert("projects", JSONObject().put("id", t.uid).put("owner", t.ownerUid).put("deleted", true)) } catch (_: Exception) { }
+            }
+        }
+    }
+
     suspend fun sendMessage(tripId: Long, body: String, expenseUid: String = ""): MessageEntity {
         val s = me()
         val m = MessageEntity(tripId = tripId, body = body.trim().take(4000), expenseUid = expenseUid, authorUid = s.userId, authorName = myName().ifBlank { s.contact })
@@ -125,7 +140,7 @@ class SyncEngine(
                 val visible = client.select("projects", "select=id,owner,data,deleted")
                 for (i in 0 until visible.length()) {
                     val r = visible.getJSONObject(i)
-                    if (r.optBoolean("deleted")) continue
+                    if (r.optBoolean("deleted") || cursors.get("hidden:" + r.getString("id")).isNotBlank()) continue
                     if (repo.trips.byUid(r.getString("id")) == null) createMemberCopy(r)
                 }
             }
@@ -240,6 +255,7 @@ class SyncEngine(
             repo.trips.update(t.copy(shared = false, myRole = "REMOVED"))
             return
         }
+        if (rows.getJSONObject(0).optBoolean("deleted")) { repo.trips.update(t.copy(shared = false, myRole = "REMOVED")); return }
         val d = rows.getJSONObject(0).optJSONObject("data") ?: return
         val updated = SyncMapper.applyTrip(t, d)
         if (updated != t) repo.trips.update(updated)

@@ -131,6 +131,8 @@ fun TripCard(t: TripWithStats, processing: Boolean, onClick: () -> Unit) {
                 Text("${t.expenseCount} bill${if (t.expenseCount == 1) "" else "s"}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (t.pendingCount > 0 && t.claimStatus == ClaimStatus.DRAFT)
                     Text("· ${t.pendingCount} to review", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.tertiary)
+                if (t.shared) Text("· Team", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.secondary)
+                if (t.unread > 0) Text("· ${t.unread} new message${if (t.unread == 1) "" else "s"}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
                 t.submittedAt?.let { if (t.claimStatus != ClaimStatus.DRAFT) Text("· submitted ${Fmt.date(com.tareimbursement.app.data.Repository.toDate(it))}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             }
             t.budget?.takeIf { it > 0 }?.let { b ->

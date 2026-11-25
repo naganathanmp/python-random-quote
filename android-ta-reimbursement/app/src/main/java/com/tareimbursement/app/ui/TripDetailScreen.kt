@@ -1,5 +1,8 @@
 package com.tareimbursement.app.ui
 
+import androidx.compose.material.icons.outlined.Group
+import androidx.compose.material.icons.automirrored.outlined.Chat
+
 import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -147,6 +150,15 @@ fun TripDetailScreen(tripId: Long, nav: NavHostController) {
     var supportFor by rememberSaveable { mutableStateOf<Long?>(null) }
 
     val t = trip
+    val manage = t == null || com.tareimbursement.app.service.sync.SyncEngine.canManage(t)
+    val myUid = c.supabase.session?.userId.orEmpty()
+    val unread by androidx.compose.runtime.produceState(0, t?.chatReadAt, t?.syncedAt) {
+        value = c.repo.messages.forTrip(tripId).count { it.createdAt > (t?.chatReadAt ?: 0) && it.authorUid != myUid }
+    }
+    // Team claims stay fresh while open.
+    LaunchedEffect(t?.shared) {
+        while (t?.shared == true) { try { c.sync.syncTrip(tripId) } catch (_: Exception) { }; kotlinx.coroutines.delay(30_000) }
+    }
     LaunchedEffect(t?.status) { if (t != null && t.isArchived) { nav.navigate(Routes.claim(tripId)) { popUpTo(Routes.trip(tripId)) { inclusive = true } } } }
 
     val supportCamera = rememberCamera { uri -> supportFor?.let { c.jobs.startImport(tripId, listOf(uri), it) } }
@@ -161,9 +173,15 @@ fun TripDetailScreen(tripId: Long, nav: NavHostController) {
                 title = { Text(t?.title ?: "", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 navigationIcon = { IconButton(onClick = { nav.popBackStack() }) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back") } },
                 actions = {
+                    if (t?.shared == true) IconButton(onClick = { nav.navigate(Routes.chat(tripId)) }) {
+                        androidx.compose.material3.BadgedBox(badge = { if (unread > 0) androidx.compose.material3.Badge { Text("$unread") } }) {
+                            Icon(Icons.AutoMirrored.Outlined.Chat, "Team chat")
+                        }
+                    }
+                    IconButton(onClick = { nav.navigate(Routes.team(tripId)) }) { Icon(Icons.Outlined.Group, "Team") }
                     IconButton(onClick = { menu = true }) { Icon(Icons.Outlined.MoreVert, "More") }
                     DropdownMenu(menu, { menu = false }) {
-                        DropdownMenuItem(text = { Text("Edit claim details") }, leadingIcon = { Icon(Icons.Outlined.Edit, null) }, onClick = { menu = false; nav.navigate(Routes.editTrip(tripId)) })
+                        if (manage) DropdownMenuItem(text = { Text("Edit claim details") }, leadingIcon = { Icon(Icons.Outlined.Edit, null) }, onClick = { menu = false; nav.navigate(Routes.editTrip(tripId)) })
                         DropdownMenuItem(text = { Text("Add expense without bill") }, leadingIcon = { Icon(Icons.Outlined.AddCircleOutline, null) }, onClick = {
                             menu = false
                             scope.launch(kotlinx.coroutines.Dispatchers.Main.immediate) { val id = c.repo.addManualExpense(tripId, t?.startDate); nav.navigate(Routes.expense(id)) }
@@ -172,13 +190,16 @@ fun TripDetailScreen(tripId: Long, nav: NavHostController) {
                             menu = false
                             scope.launch(kotlinx.coroutines.Dispatchers.Main.immediate) { val id = c.repo.addMileageExpense(tripId, t?.startDate, c.prefs.mileageRate); nav.navigate(Routes.expense(id)) }
                         })
-                        DropdownMenuItem(text = { Text("Delete claim") }, leadingIcon = { Icon(Icons.Outlined.Delete, null) }, onClick = { menu = false; confirmDelete = true })
+                        DropdownMenuItem(text = { Text(if (manage) "Delete claim" else "Remove from this phone") }, leadingIcon = { Icon(Icons.Outlined.Delete, null) }, onClick = { menu = false; confirmDelete = true })
                     }
                 },
             )
         },
         bottomBar = {
-            if (expenses.isNotEmpty()) Surface(tonalElevation = 3.dp) {
+            if (expenses.isNotEmpty() && !manage) Surface(tonalElevation = 3.dp) {
+                Text("You're a team member: add and review your bills here. The project owner generates and submits the TA statement.",
+                    style = MaterialTheme.typography.bodySmall, modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(16.dp))
+            } else if (expenses.isNotEmpty()) Surface(tonalElevation = 3.dp) {
                 Button(
                     onClick = { nav.navigate(Routes.generate(tripId)) }, enabled = importState !is JobState.Running,
                     modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(16.dp).height(50.dp),
@@ -194,7 +215,7 @@ fun TripDetailScreen(tripId: Long, nav: NavHostController) {
                 SectionCard {
                     Text("${t.clientName} · ${t.projectCode}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text("${Fmt.range(t.startDate, t.endDate)}${if (t.location.isNotBlank()) " · ${t.location}" else ""}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text("Claim ${t.claimNumber}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Claim ${t.claimNumber}" + if (t.shared) " · Team project (${people.count { it.inviteStatus == "JOINED" }} on the app)" else "", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(Modifier.height(12.dp))
                     Row {
                         Stat("Total", Fmt.inr(total), Modifier.weight(1f))
@@ -228,7 +249,7 @@ fun TripDetailScreen(tripId: Long, nav: NavHostController) {
                     }
                 }
                 items(expenses, key = { it.id }) { e ->
-                    ExpenseRow(e, atts.count { it.expenseId == e.id }) { nav.navigate(Routes.expense(e.id)) }
+                    ExpenseRow(e, atts.count { it.expenseId == e.id }, addedBy = if (t.shared && e.addedByUid.isNotBlank() && e.addedByUid != myUid) e.addedBy else null) { nav.navigate(Routes.expense(e.id)) }
                 }
             }
         }
@@ -255,8 +276,8 @@ fun TripDetailScreen(tripId: Long, nav: NavHostController) {
     if (confirmDelete) AlertDialog(
         onDismissRequest = { confirmDelete = false },
         title = { Text("Delete this claim?") },
-        text = { Text("All ${expenses.size} expenses and their files will be permanently removed from this phone.") },
-        confirmButton = { TextButton(onClick = { confirmDelete = false; scope.launch(kotlinx.coroutines.Dispatchers.Main.immediate) { c.repo.deleteTrip(tripId); nav.popBackStack() } }) { Text("Delete", color = MaterialTheme.colorScheme.error) } },
+        text = { Text("All ${expenses.size} expenses and their files will be permanently removed from this phone." + if (t?.shared == true && manage) " The team project is closed for everyone." else if (t?.shared == true) " You will stop receiving this team project." else "") },
+        confirmButton = { TextButton(onClick = { confirmDelete = false; scope.launch(kotlinx.coroutines.Dispatchers.Main.immediate) { if (t?.shared == true || t?.myRole == "REMOVED") c.sync.forget(tripId); c.repo.deleteTrip(tripId); nav.popBackStack() } }) { Text("Delete", color = MaterialTheme.colorScheme.error) } },
         dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } },
     )
 }
@@ -269,7 +290,7 @@ fun ImportStatus(state: JobState?, onDismiss: () -> Unit) {
             Spacer(Modifier.height(8.dp))
             if (state.total > 0) LinearProgressIndicator(progress = { (state.done.toFloat() / state.total).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
             else LinearProgressIndicator(Modifier.fillMaxWidth())
-            Text("Reading text on this phone — nothing is uploaded.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp))
+            Text("Reading the bills on this phone.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp))
         }
         is JobState.ImportDone -> {
             val r = state.result
@@ -298,7 +319,7 @@ fun ImportStatus(state: JobState?, onDismiss: () -> Unit) {
 }
 
 @Composable
-fun ExpenseRow(e: ExpenseEntity, attachmentCount: Int, onClick: () -> Unit) {
+fun ExpenseRow(e: ExpenseEntity, attachmentCount: Int, addedBy: String? = null, onClick: () -> Unit) {
     val cat = e.categoryEnum
     Card(onClick = onClick, modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), elevation = CardDefaults.cardElevation(0.5.dp)) {
         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -315,7 +336,11 @@ fun ExpenseRow(e: ExpenseEntity, attachmentCount: Int, onClick: () -> Unit) {
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 4.dp)) {
                     if (!e.confirmed) Pill("Review", MaterialTheme.colorScheme.tertiaryContainer, MaterialTheme.colorScheme.onTertiaryContainer)
-                    if ((e.duplicateOfId ?: 0) > 0) Pill("Duplicate?", MaterialTheme.colorScheme.errorContainer, MaterialTheme.colorScheme.onErrorContainer)
+                    if (e.trustBlocked) Pill("AI-made?", MaterialTheme.colorScheme.errorContainer, MaterialTheme.colorScheme.onErrorContainer)
+                    else if (e.needsTrustAck) Pill("Check", MaterialTheme.colorScheme.errorContainer, MaterialTheme.colorScheme.onErrorContainer)
+                    else if ((e.duplicateOfId ?: 0) > 0 || e.dupNote.isNotBlank() && e.trustAck.isBlank()) Pill("Duplicate?", MaterialTheme.colorScheme.errorContainer, MaterialTheme.colorScheme.onErrorContainer)
+                    if (e.aiState == "QUEUED") Pill("AI reading…", MaterialTheme.colorScheme.secondaryContainer, MaterialTheme.colorScheme.onSecondaryContainer)
+                    addedBy?.takeIf { it.isNotBlank() }?.let { Pill("By $it", MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.colorScheme.onSurfaceVariant) }
                     if (attachmentCount == 0) Pill("No bill", MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.colorScheme.onSurfaceVariant)
                     else if (attachmentCount > 1) Pill("$attachmentCount files", MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.colorScheme.onSurfaceVariant)
                 }

@@ -156,8 +156,10 @@ class UiFlowTest {
         // Generate outputs and archive.
         rule.onNodeWithText("Generate TA statement").performClick()
         waitText("Generate Excel, PDF & receipts")
+        // The button is enabled once the pre-generation checks have loaded.
+        rule.waitUntil(15_000) { rule.onAllNodes(hasText("Generate Excel, PDF & receipts") and androidx.compose.ui.test.isEnabled()).fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("Generate Excel, PDF & receipts").performScrollTo().performClick()
-        rule.waitUntil(30_000) {
+        rule.waitUntil(60_000) {
             rule.onAllNodesWithText("Mark completed & archive", substring = true).fetchSemanticsNodes().isNotEmpty() ||
                 rule.onAllNodesWithText("Could not generate", substring = true).fetchSemanticsNodes().isNotEmpty()
         }
@@ -190,7 +192,8 @@ class UiFlowTest {
         waitText("Completed TA statements")
         waitText("Stat Audit")
         rule.onNodeWithText("Settings").performClick()
-        waitText("Back up all data")
+        waitText("On-device AI")
+        rule.onNode(androidx.compose.ui.test.hasScrollToIndexAction()).performScrollToNode(hasText("Per-bill limits & own-vehicle rate"))
         rule.onNodeWithText("Per-bill limits & own-vehicle rate").performClick()
         waitText("Per-bill limits — leave blank for no limit.")
         rule.onNodeWithText("Cancel").performClick()

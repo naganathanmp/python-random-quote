@@ -95,7 +95,7 @@ class CrashResilienceTest {
             rule.waitForIdle()
             recreate()
         }
-        waitText("Back up all data")
+        waitText("On-device AI")
         val trips = runBlocking { rule.activity.container.repo.trips.all() }
         assertEquals(1, trips.size)
         assertEquals(1000.0, trips[0].budget!!, 0.0)
