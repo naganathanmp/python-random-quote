@@ -8,6 +8,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.printToString
@@ -71,6 +72,23 @@ class CrashResilienceTest {
         recreate()                                   // claim screen with budget card
         waitText("0% used")
 
+        // v2.0 team screens: Team → Team sharing (sign in) and back.
+        rule.onNodeWithContentDescription("Team").performClick()
+        waitText("Share this project")
+        waitText("Anita")
+        recreate()
+        rule.onNodeWithText("Set up team sharing first").performScrollTo().performClick()
+        waitText("1. Team server")
+        input("Project URL (https://….supabase.co)", "https://demo.supabase.co")
+        recreate()
+        waitText("https://demo.supabase.co")
+        rule.onNodeWithText("Save server").performScrollTo().performClick()
+        waitText("Enter an https:// URL and the anon key")
+        rule.onNodeWithContentDescription("Back").performClick()
+        waitText("Share this project")
+        rule.onNodeWithContentDescription("Back").performClick()
+        waitText("Scan bill")
+
         // Own-vehicle expense → expense screen with mileage inputs, shares, currency.
         rule.onNodeWithContentDescription("More").performClick()
         rule.onNodeWithText("Own vehicle trip", substring = true).performClick()
@@ -95,6 +113,13 @@ class CrashResilienceTest {
             rule.waitForIdle()
             recreate()
         }
+        waitText("On-device AI")
+        rule.onNode(androidx.compose.ui.test.hasScrollToIndexAction()).performScrollToNode(hasText("Verify a document"))
+        rule.onNodeWithText("Verify a document").performClick()
+        waitText("Choose file(s)")
+        recreate()
+        waitText("Choose file(s)")
+        rule.onNodeWithContentDescription("Back").performClick()
         waitText("On-device AI")
         val trips = runBlocking { rule.activity.container.repo.trips.all() }
         assertEquals(1, trips.size)

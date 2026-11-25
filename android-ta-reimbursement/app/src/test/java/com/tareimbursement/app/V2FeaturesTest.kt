@@ -119,6 +119,8 @@ class V2FeaturesTest {
         val id = repo.addManualExpense(t, LocalDate.of(2026, 3, 11))
         repo.saveExpense(repo.expenses.get(id)!!.copy(amount = 500.0, description = "Taxi to client", category = ExpenseCategory.LOCAL_CONVEYANCE.name, confirmed = true, modeOfTravel = "Car - Taxi"))
         val out = exporter.generate(t, EmployeeInfo("Asha Rao", "E1", "", "", "", "Firm", ""))
+        val keep = File(System.getProperty("java.io.tmpdir"), "ta_test_out/signed").apply { deleteRecursively(); mkdirs() }
+        out.all.forEach { it.copyTo(File(keep, it.name), overwrite = true) }
         val v = PdfSigner.verify(out.pdf.readBytes())
         assertTrue(v.message, v.valid && v.coversWholeFile)
         assertEquals("Asha Rao (E1)", v.signer)

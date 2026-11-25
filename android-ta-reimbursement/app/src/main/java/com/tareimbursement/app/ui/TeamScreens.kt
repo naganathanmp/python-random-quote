@@ -82,6 +82,12 @@ private fun shareText(ctx: android.content.Context, subject: String, text: Strin
     safeLaunch(ctx) { ctx.startActivity(Intent.createChooser(i, "Send invitation")) }
 }
 
+/** The service_role JWT bypasses all security rules; it must never be entered on a phone. */
+fun isServiceKey(key: String): Boolean = try {
+    val payload = key.split('.').getOrNull(1) ?: ""
+    String(android.util.Base64.decode(payload, android.util.Base64.URL_SAFE or android.util.Base64.NO_PADDING or android.util.Base64.NO_WRAP)).contains("service_role")
+} catch (e: Exception) { false } || key.startsWith("sb_secret_")
+
 /** "TA1:" + base64(url|key): lets a team member set up the same server by pasting one line. */
 object ServerCode {
     fun encode(url: String, key: String) = "TA1:" + android.util.Base64.encodeToString("$url|$key".toByteArray(), android.util.Base64.NO_WRAP or android.util.Base64.URL_SAFE)
@@ -107,6 +113,7 @@ fun AccountScreen(nav: NavHostController) {
     var sent by rememberSaveable { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var msg by remember { mutableStateOf<String?>(null) }
+    var serverMsg by remember { mutableStateOf<String?>(null) }
     var signedIn by remember { mutableStateOf(c.supabase.signedIn) }
     val syncErr by c.sync.lastError.collectAsState()
     val syncing by c.sync.syncing.collectAsState()
@@ -132,12 +139,15 @@ fun AccountScreen(nav: NavHostController) {
                     OutlinedTextField(key, { key = it.trim() }, label = { Text("Public anon key") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                     Row {
                         TextButton(onClick = {
-                            if (!com.tareimbursement.app.service.sync.ServerConfig(url.trimEnd('/'), key).valid) { msg = "Enter an https:// URL and the anon key"; return@TextButton }
-                            if (key.contains("service_role")) { msg = "That is the secret service key - use the public anon key instead."; return@TextButton }
-                            c.prefs.serverUrl = url; c.prefs.serverKey = key; Toast.makeText(ctx, "Server saved", Toast.LENGTH_SHORT).show()
+                            serverMsg = when {
+                                !com.tareimbursement.app.service.sync.ServerConfig(url.trimEnd('/'), key).valid -> "Enter an https:// URL and the anon key"
+                                isServiceKey(key) -> "That is the secret service_role key - never put it on a phone. Use the public anon key."
+                                else -> { c.prefs.serverUrl = url; c.prefs.serverKey = key; "Server saved" }
+                            }
                         }) { Text("Save server") }
                         if (c.prefs.serverUrl.isNotBlank()) TextButton(onClick = { shareText(ctx, "TA Reimburse team server", ServerCode.encode(c.prefs.serverUrl, c.prefs.serverKey)) }) { Text("Share code") }
                     }
+                    serverMsg?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = if (it == "Server saved") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error) }
                 }
             }
             item {

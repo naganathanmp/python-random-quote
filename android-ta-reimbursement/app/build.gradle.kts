@@ -20,8 +20,8 @@ android {
         applicationId = "com.tareimbursement.app"
         minSdk = 29
         targetSdk = 35
-        versionCode = 4
-        versionName = "1.3.0"
+        versionCode = 5
+        versionName = "2.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // Real phones only (ARM); keeps the ML Kit OCR native library small.
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
@@ -58,7 +58,6 @@ android {
         unitTests.all {
             it.maxHeapSize = "3g"
             it.systemProperty("robolectric.dependency.repo.url", "https://maven-central.storage-download.googleapis.com/maven2/")
-            it.systemProperty("ta.debug", "1")
         }
     }
     lint {
@@ -67,7 +66,7 @@ android {
         abortOnError = true
     }
     packaging {
-        resources.excludes += setOf("META-INF/AL2.0", "META-INF/LGPL2.1")
+        resources.excludes += setOf("META-INF/AL2.0", "META-INF/LGPL2.1", "META-INF/versions/9/OSGI-INF/MANIFEST.MF")
     }
 }
 

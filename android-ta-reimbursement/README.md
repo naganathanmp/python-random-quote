@@ -3,11 +3,49 @@
 Snap or upload your bills, review what the app reads from them, and get a submission-ready
 **TA statement in Excel (PKF format)**, **one combined PDF of all invoices & supporting
 documents**, and a **ZIP of receipts renamed `DDth Mon YYYY_Amount` and sorted by accounting head**.
-Everything is processed on the phone; the app has no internet permission.
+Bills are read on the phone (text recognition + an optional open-source AI model running on the
+phone). Internet is used only to download that AI model once and, if you turn it on, to share a
+project with your team through your firm's own server.
 
-**Install:** copy `release/TA-Reimburse-v1.3.0.apk` to your phone, open it and allow
+**Install:** copy `release/TA-Reimburse-v2.0.0.apk` to your phone, open it and allow
 "Install unknown apps" for your file manager / browser when Android asks. Android 10 or newer.
-v1.3.0 installs over any earlier version and keeps existing claims (database upgraded automatically).
+v2.0.0 installs over any earlier version and keeps existing claims (database upgraded automatically).
+
+## What's new in 2.0.0
+
+- **On-device AI bill reader** – an open-source model (Qwen 2.5 by Alibaba, Apache-2.0; optional
+  Gemma 3n for 8 GB phones) runs *on the phone* with Google MediaPipe and reads each bill a second
+  time after the text scan: amount, date, vendor, nature, accounting head and a short remark. The
+  app picks the model for the phone's memory (Settings → On-device AI; one-time 0.5–1.6 GB download,
+  Wi-Fi only by default, checksum-verified). Code checks every AI answer against the bill text – an
+  amount or date that is not printed on the bill is rejected – and you still confirm every bill.
+  The AI never overwrites what you typed. Test set: dates & amounts 28/32 with rules alone → 32/32.
+- **Date from the file** – when no date is printed, the photo's capture date / PDF creation date is
+  used and marked "please check".
+- **Trust check** on every uploaded file (bills and supporting documents): reads EXIF/XMP/IPTC,
+  C2PA Content Credentials, PNG text chunks, PDF producer/creator/dates/revisions and Office
+  properties. AI-generated files (AI tool names, `DigitalSourceType = trainedAlgorithmicMedia`,
+  image-generator settings) are **blocked**; photo editors, online invoice generators, PDFs edited
+  after creation, photos taken before the bill date and invalid GSTIN check digits must be
+  **confirmed with a reason**.
+- **Duplicate bills across all claims** – same file (SHA-256), same-looking photo (perceptual hash),
+  same vendor + bill no., or same date + amount + vendor, in this or any earlier claim. Strong
+  matches must be explained before generating.
+- **One remarks field** – the extra "Remarks (shown in Annexure)" and "Paid by" fields are gone; the
+  single mandatory remarks appears in the Annexure, the PDF index and on top of every bill page.
+  Vendor and bill no. moved under "More details". Old extra remarks were merged automatically.
+- **Declaration & authenticity** on the Excel annexure and as the last PDF page: who prepared the
+  claim, that every bill was confirmed by a person, whether the on-device AI helped read bills, and
+  flagged bills that were kept with their reasons.
+- **Digital signatures** – the combined PDF carries an embedded signature (PAdES/PKCS#7; Adobe
+  Reader shows it in the Signature panel) and the Excel gets a detached `.xlsx.p7s` signature. The key
+  lives in the phone's Android Keystore; the certificate names the person. **Settings → Verify a
+  document** checks any PDF or Excel + `.p7s`.
+- **Team projects** – share a claim with co-travellers by e-mail or mobile number; everyone adds
+  their own bills (photos included) from their phone and sees the team's spend; **team chat** per
+  project with "Discuss this bill". Uses your firm's own Supabase project — set-up in
+  [`server/README.md`](server/README.md). Only the owner edits claim details and generates/submits;
+  members edit only their own bills (enforced by the server's row-level security).
 
 ## What's new in 1.3.0
 
@@ -98,8 +136,16 @@ v1.3.0 installs over any earlier version and keeps existing claims (database upg
 
 ## Security
 
-- No network permission at all (INTERNET removed, incl. ML Kit telemetry); Android cloud backup and
-  device-to-device transfer disabled; release build not debuggable, R8-shrunk, v2-signed.
+- Network: HTTPS only (cleartext disabled, system CAs only). Used for the AI model download from
+  huggingface.co (redirects must stay HTTPS; a Hugging Face token is only ever sent to
+  huggingface.co) and for the team server you configure. ML Kit's usage-statistics upload has no
+  backend (removed from the manifest). Android cloud backup and device-to-device transfer disabled;
+  release build not debuggable, R8-shrunk, v2-signed.
+- Team server: only the public anon key is on the phone (the `service_role` key is refused);
+  row-level security limits every row and file to project members (tested on PostgreSQL with
+  owner/member/stranger/anon roles); sign-in by one-time code; session and Hugging Face tokens are
+  encrypted with an Android Keystore AES-256-GCM key.
+- Signing key: EC P-256 in the Android Keystore, never exported.
 - Only one exported activity (launcher + Share-to). Incoming shares accept `content://` URIs from
   other apps only — never `file://` or this app's own FileProvider (blocks "confused deputy" attempts
   to import the app's private database or other claims).
@@ -115,19 +161,22 @@ v1.3.0 installs over any earlier version and keeps existing claims (database upg
 
 ## Privacy
 
-- On-device OCR (Google ML Kit bundled model) – no images or text are uploaded.
-- `INTERNET` permission is removed from the manifest; Android cloud backup/device transfer are
-  disabled. Files leave the phone only when you Download, E-mail, Share or Back up.
+- Bill reading is on the phone: ML Kit text recognition (bundled model) and the open-source AI model
+  (MediaPipe LLM inference, text only, offline). No AI service or cloud reads your bills.
+- Claims you don't share never leave the phone except when you Download, E-mail, Share or Back up.
+  Shared (team) projects are stored in **your firm's** Supabase project only.
 
 ## Build & test
 
 ```bash
 cd android-ta-reimbursement
-./gradlew :app:testDebugUnitTest   # 57 JVM + Robolectric tests (parser, Excel template, PDF, split, currency, travellers, OCR clean-up & voting, budget, migrations, security, e-mail intents, rotation/crash resilience, workflows, UI)
+./gradlew :app:testDebugUnitTest   # 81 JVM + Robolectric tests (parser, AI prompt/validation eval, trust check, duplicates, signatures verified with pdfsig/openssl, two-phone team sync, Excel template, PDF, split, currency, travellers, OCR, budget, migrations 1→4, security, rotation/crash resilience, workflows, UI)
 ./gradlew :app:lintRelease
 ./gradlew :app:assembleRelease     # needs keystore.properties (not committed) or falls back to debug signing
 ```
 
-Project layout: `core/` (pure Kotlin: receipt parser, file namer, XLSX writer + PKF workbook, PDF
-writer + combined PDF, insights), `data/` (Room), `service/` (import, OCR, export, sharing, backup,
-background jobs), `ui/` (Jetpack Compose screens).
+Project layout: `core/` (pure Kotlin: receipt parser, `ai/` prompt + validation, `trust/` metadata &
+duplicates, `sign/` PDF/CMS signatures, XLSX writer + PKF workbook, PDF writer, insights), `data/`
+(Room), `service/` (import, OCR, `ai/` model manager + MediaPipe engine, `sync/` Supabase client +
+sync engine, export, signing, sharing, backup), `ui/` (Jetpack Compose screens), `server/` (Supabase
+SQL + set-up guide).

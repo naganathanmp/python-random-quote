@@ -1,7 +1,8 @@
 # TA Reimburse – feedback backlog for the next version
 
-Collected feedback to implement together in the next release (after v1.3.0).
-Status: **noted – not started** (waiting for the remaining feedback before building).
+Collected feedback after v1.3.0. **Status: all items below were built in v2.0.0**, together with the
+later feedback (on-device AI bill reader, date from metadata, fewer fields, team projects with
+sync and chat). Open decisions are listed at the end.
 
 ## 1. Duplicate bill / invoice detection (within and across projects)
 - Flag the same bill uploaded more than once, **in the same claim and across all claims/projects**
@@ -69,5 +70,17 @@ Status: **noted – not started** (waiting for the remaining feedback before bui
   with the release: new features (duplicate check, AI/fake detection & Trust check, provenance
   statement, e-signature), new screens in the app tour, quiz/FAQ/glossary entries, and the new APK
   download link / version number.
+
+## Done in v2.0.0
+1. Duplicates within and across claims ✔  2. AI-generated bills blocked ✔  3. Declaration on PDF &
+Excel ✔  4. Digital signatures (PDF embedded, Excel .p7s) + Verify screen ✔  5. Trust check on all
+files ✔  6. One remarks field ✔  + on-device AI, metadata date, team projects/sync/chat ✔
+
+## Open decisions
+- Declaration wording (see the last page of the sample PDF) – confirm or edit.
+- Signature certificate: self-issued per phone today; option to use the firm's/person's DSC.
+- Mobile-number sign-in needs a paid SMS provider in Supabase (e-mail codes work free).
+- Picture-reading AI (Gemma 3n vision) is left out because MediaPipe's image input pulls in Google
+  usage telemetry; can be added if the firm accepts that.
 
 ## (More feedback to be added here)
