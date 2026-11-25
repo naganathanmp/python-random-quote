@@ -119,7 +119,7 @@ fun rememberCamera(onCaptured: (Uri) -> Unit): () -> Unit {
     }
     return remember {
         {
-            val f = File(ctx.cacheDir, "camera/bill_${UUID.randomUUID()}.jpg").apply { parentFile?.mkdirs() }
+            val f = File(ctx.cacheDir, "camera/Camera_${UUID.randomUUID()}.jpg").apply { parentFile?.mkdirs() }
             pending = f.path
             try { launcher.launch(Sharing.uriFor(ctx, f)) } catch (e: Exception) {
                 pending = null; Toast.makeText(ctx, "No camera app available", Toast.LENGTH_LONG).show()

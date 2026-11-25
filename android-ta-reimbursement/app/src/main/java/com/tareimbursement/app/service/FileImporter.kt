@@ -8,6 +8,9 @@ import com.tareimbursement.app.core.FileSniffer
 import com.tareimbursement.app.core.ReceiptParser
 import com.tareimbursement.app.core.SniffedType
 import com.tareimbursement.app.core.ZipExpander
+import com.tareimbursement.app.core.trust.FileMetadata
+import com.tareimbursement.app.core.trust.TrustCheck
+import com.tareimbursement.app.core.trust.TrustReport
 import com.tareimbursement.app.data.AttachmentEntity
 import com.tareimbursement.app.data.AttachmentKind
 import com.tareimbursement.app.data.EventType
@@ -38,6 +41,12 @@ class FileImporter(
     private val cacheDir: File,
     /** Security policy for incoming URIs (see [UriPolicy]); the app passes the strict policy. */
     private val uriAllowed: (Uri) -> Boolean = { true },
+    /** Queue bills for the on-device AI reader after OCR. */
+    private val aiEnabled: () -> Boolean = { false },
+    /** (name, user id) of the person adding bills - shown to the team. */
+    private val whoAmI: () -> Pair<String, String> = { "" to "" },
+    /** Picture fingerprint for duplicate detection (overridable in tests). */
+    private val dHash: (File, AttachmentKind) -> Long? = { f, k -> Fingerprint.dHash(f, k) },
 ) {
 
     data class Source(val file: File, val name: String)
@@ -120,38 +129,64 @@ class FileImporter(
             // Several readings (original + enhanced) are cross-checked; the best one is kept for display.
             val fused = com.tareimbursement.app.core.ocr.OcrFusion.parse(extractor.extractReadings(stored, kind, type), trip.startDate, trip.endDate)
             val text = fused?.second.orEmpty()
+            // Hidden metadata: date fallback + trust check (AI-generated / edited / invoice makers).
+            val meta = FileMetadata.read(stored, s.name)
+            val sha = Fingerprint.sha256(stored)
+            val hash = dHash(stored, kind)
             val relPath = stored.relativeTo(repo.filesDir).path
             val mime = type.mime.takeIf { type != SniffedType.OTHER } ?: (MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "application/octet-stream")
             if (attachToExpenseId != null) {
                 val target = repo.expenses.get(attachToExpenseId)
                 if (target != null) {
                     val hasPrimary = repo.attachments.forExpense(target.id).any { it.isPrimary }
-                    repo.attachments.insert(AttachmentEntity(expenseId = target.id, tripId = tripId, storedPath = relPath, originalName = s.name, mimeType = mime, kind = kind.name, isPrimary = !hasPrimary, sizeBytes = stored.length()))
+                    repo.attachments.insert(repo.touchA(AttachmentEntity(expenseId = target.id, tripId = tripId, storedPath = relPath, originalName = s.name, mimeType = mime, kind = kind.name, isPrimary = !hasPrimary, sizeBytes = stored.length(), sha256 = sha, dHash = hash)))
+                    applyTrust(target.id, meta, text, isCamera = s.name.startsWith(CAMERA_PREFIX))
+                    repo.refreshDuplicates(target.id)
                     // Fill any still-missing fields from the supporting document.
                     if (text.isNotBlank() && (target.amount == null || target.dateEpochDay == null || target.vendor.isBlank())) {
                         val p = fused!!.first
-                        repo.expenses.update(target.copy(
+                        val cur = repo.expenses.get(target.id) ?: target
+                        repo.expenses.update(repo.touch(cur.copy(
                             amount = target.amount ?: p.amount.takeIf { !target.isForeign }, dateEpochDay = target.dateEpochDay ?: p.date?.toEpochDay(),
                             vendor = target.vendor.ifBlank { p.vendor.orEmpty() }, billNo = target.billNo.ifBlank { p.billNo.orEmpty() },
                             suggestedCategory = target.suggestedCategory ?: p.suggestion.category.name,
                             suggestionReason = target.suggestionReason.ifBlank { p.suggestion.reason },
                             noBill = false,
-                        ))
-                    } else if (target.noBill) repo.expenses.update(target.copy(noBill = false))
+                        )))
+                    } else if (target.noBill) repo.expenses.get(target.id)?.let { repo.expenses.update(repo.touch(it.copy(noBill = false))) }
                     attached++
                     return@forEachIndexed
                 }
             }
-            val parsed = fused?.first
+            var parsed = fused?.first
+            // Date not printed on the bill: use when the photo was taken / the PDF was created.
+            val metaDate = meta.createdDate?.takeIf { d -> !d.isAfter(java.time.LocalDate.now()) && !d.isBefore(trip.startDate.minusDays(60)) }
+            val fromMeta = parsed != null && parsed.date == null && metaDate != null
+            if (fromMeta) parsed = parsed!!.copy(date = metaDate, dateConfident = false, dateFromMetadata = true)
             val expenseId = repo.createExpenseFromReceipt(tripId, parsed, text)
-            if ((repo.expenses.get(expenseId)?.duplicateOfId ?: 0) > 0) duplicates++
-            repo.attachments.insert(AttachmentEntity(expenseId = expenseId, tripId = tripId, storedPath = relPath, originalName = s.name, mimeType = mime, kind = kind.name, isPrimary = true, sizeBytes = stored.length()))
+            val (who, whoUid) = whoAmI()
+            repo.expenses.get(expenseId)?.let { e ->
+                repo.expenses.update(e.copy(addedBy = who, addedByUid = whoUid, dateFromMetadata = fromMeta,
+                    aiState = if (aiEnabled() && text.isNotBlank()) AI_QUEUED else ""))
+            }
+            repo.attachments.insert(repo.touchA(AttachmentEntity(expenseId = expenseId, tripId = tripId, storedPath = relPath, originalName = s.name, mimeType = mime, kind = kind.name, isPrimary = true, sizeBytes = stored.length(), sha256 = sha, dHash = hash)))
+            applyTrust(expenseId, meta, text, isCamera = s.name.startsWith(CAMERA_PREFIX))
+            if (repo.refreshDuplicates(expenseId).isNotBlank() || (repo.expenses.get(expenseId)?.duplicateOfId ?: 0) > 0) duplicates++
             created += expenseId
         }
         onProgress(ImportProgress(expanded.size, expanded.size, "Done"))
         val n = created.size + attached
         if (n > 0) repo.logEvent(tripId, EventType.FILES, if (attachToExpenseId != null) "Added $attached supporting document(s)" else "Added ${created.size} bill(s) from ${sources.size} upload(s)")
         ImportResult(created, attached, skipped, duplicates)
+    }
+
+    private suspend fun applyTrust(expenseId: Long, meta: com.tareimbursement.app.core.trust.FileMeta, text: String, isCamera: Boolean) {
+        val e = repo.expenses.get(expenseId) ?: return
+        val now = TrustCheck.assess(meta, e.date, text, isCamera)
+        // Merge with findings from the bill's other documents; the worst one decides.
+        val merged = TrustReport((e.trust.findings + now.findings).distinctBy { it.code + it.message })
+        repo.expenses.update(repo.touch(e.copy(trustLevel = merged.level.name, trustReport = merged.encode(),
+            trustAck = if (merged.level.ordinal > e.trust.level.ordinal) "" else e.trustAck)))
     }
 
     private fun displayName(uri: Uri): String? = try {
@@ -164,6 +199,9 @@ class FileImporter(
     companion object {
         /** Largest single file accepted (protects storage from oversized / malicious uploads). */
         const val MAX_FILE_BYTES = 200L * 1024 * 1024
+        const val AI_QUEUED = "QUEUED"
+        /** Photos taken with the in-app camera are named with this prefix. */
+        const val CAMERA_PREFIX = "Camera_"
 
         fun kindOf(t: SniffedType): AttachmentKind = when {
             t.isImage -> AttachmentKind.IMAGE

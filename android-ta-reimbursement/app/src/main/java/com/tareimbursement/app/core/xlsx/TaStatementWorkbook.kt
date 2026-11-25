@@ -223,6 +223,15 @@ object TaStatementWorkbook {
             s.str(r, 3, cat.guidance, ann(fill = ORANGE))
             r++
         }
+        d.provenance?.let { p ->
+            r++
+            s.str(r, 1, "Declaration & authenticity", green); s.mergeStyled(r, 1, r, 7, green); r++
+            val para = ann(fill = "FFFFFF", wrap = true, h = "left").copy(vAlign = "top")
+            p.paragraphs().forEach { t ->
+                s.str(r, 1, t, para); s.mergeStyled(r, 1, r, 7, para)
+                s.height(r, 18.0 * (1 + t.length / 190)); r++
+            }
+        }
         s.landscape = true
         return lastData
     }

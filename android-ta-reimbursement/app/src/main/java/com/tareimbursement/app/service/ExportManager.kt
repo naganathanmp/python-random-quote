@@ -26,7 +26,12 @@ import com.tareimbursement.app.data.SplitMode
 import com.tareimbursement.app.data.TripEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import com.tareimbursement.app.core.Provenance
+import com.tareimbursement.app.core.sign.DocSigner
+import com.tareimbursement.app.core.sign.PdfSigner
+import com.tareimbursement.app.core.sign.Signing
 import java.io.File
+import java.security.cert.X509Certificate
 import java.time.LocalDate
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
@@ -67,7 +72,13 @@ class AndroidPageRenderer : PageRenderer {
     }
 }
 
-class ExportManager(private val repo: Repository, private val renderer: PageRenderer = AndroidPageRenderer()) {
+class ExportManager(
+    private val repo: Repository,
+    private val renderer: PageRenderer = AndroidPageRenderer(),
+    /** Signing key + certificate for the person (null = outputs are not signed). */
+    private val identity: (EmployeeInfo) -> Pair<DocSigner, X509Certificate>? = { null },
+    private val appVersion: String = "",
+) {
 
     fun outputsFor(trip: TripEntity): ClaimOutputs {
         val dir = repo.outputDir(trip.id)
@@ -84,7 +95,7 @@ class ExportManager(private val repo: Repository, private val renderer: PageRend
         val zipEntries: List<Triple<String, File, String>>,
     )
 
-    suspend fun prepare(tripId: Long, employee: EmployeeInfo, today: LocalDate = LocalDate.now()): Prepared {
+    suspend fun prepare(tripId: Long, employee: EmployeeInfo, today: LocalDate = LocalDate.now(), signer: String? = null): Prepared {
         val trip = repo.trips.get(tripId) ?: throw IllegalStateException("Claim not found")
         val expenses = repo.expenses.forTrip(tripId)
             .sortedWith(compareBy<ExpenseEntity>({ it.dateEpochDay ?: Long.MAX_VALUE }, { (it.categoryEnum ?: ExpenseCategory.OTHER).ordinal }, { it.createdAt }))
@@ -102,12 +113,8 @@ class ExportManager(private val repo: Repository, private val renderer: PageRend
 
         val lines = expenses.mapIndexed { i, e ->
             val atts = attsByExpense.getValue(e.id)
-            val remarks = buildList {
-                if (e.remarks.isNotBlank()) add(e.remarks.trim())
-                if ((atts.isEmpty() || e.noBill) && !e.isMileage) add("No bill – self-declared")
-                if (atts.size > 1) add("${atts.size} documents")
-                if (e.paymentMode.isNotBlank()) add("Paid by ${e.paymentMode}")
-            }.joinToString("; ")
+            // One remarks field everywhere: the mandatory remarks (description). "Sup Bills Y/N" already shows a missing bill.
+            val remarks = ""
             val parsedShares = Shares.parse(e.shares)
             val shares = if (people.size > 1) parsedShares.mapNotNull { (id, v) -> labelOf[id]?.let { it to v } } else emptyList()
             val personName = people.associate { it.id to it.name }
@@ -136,6 +143,14 @@ class ExportManager(private val repo: Repository, private val renderer: PageRend
             lines,
             travellers = travellers,
             entities = ents.map { EntityInfo(it.name, it.code, it.sharePercent) },
+            provenance = Provenance(
+                documentId = trip.claimNumber + "-" + documentSuffix(),
+                preparedBy = if (employee.employeeCode.isBlank()) employee.name else "${employee.name} (${employee.employeeCode})",
+                preparedAt = java.time.LocalDateTime.now(), appVersion = appVersion,
+                aiAssisted = expenses.any { it.aiState == "DONE" },
+                flaggedKept = expenses.mapIndexedNotNull { i, e -> e.trustAck.takeIf { it.isNotBlank() }?.let { "#${i + 1} ${it.take(80)}" } },
+                signer = signer,
+            ),
         )
         val docs = expenses.mapIndexed { i, e ->
             ExpenseDocs(lines[i], attsByExpense.getValue(e.id).map { a ->
@@ -177,7 +192,9 @@ class ExportManager(private val repo: Repository, private val renderer: PageRend
         if (trip0.split == SplitMode.AUTO) { onStep("Splitting bills across client entities…"); repo.autoAllocate(tripId) }
         val trip = repo.trips.get(tripId)!!
         onStep("Preparing statement…")
-        val p = prepare(tripId, employee)
+        val id = try { identity(employee) } catch (e: Throwable) { null }
+        val signerName = id?.second?.subjectX500Principal?.name?.let { Regex("CN=([^,]+)").find(it)?.groupValues?.get(1) }
+        val p = prepare(tripId, employee, signer = signerName)
         val out = outputsFor(trip)
         repo.outputDir(tripId).listFiles()?.forEach { it.delete() }
 
@@ -185,6 +202,7 @@ class ExportManager(private val repo: Repository, private val renderer: PageRend
         writeAtomically(out.excel) { TaStatementWorkbook.write(p.data, it) }
         onStep("Combining invoices into one PDF…")
         writeAtomically(out.pdf) { CombinedPdfBuilder.build(p.data, p.docs, it) }
+        if (id != null) { onStep("Signing digitally…"); signOutputs(id, trip.claimNumber, out.excel, out.pdf) }
 
         val perEntity = mutableListOf<Triple<EntityInfo, File, File>>()
         if (p.data.isSplit) {
@@ -197,6 +215,7 @@ class ExportManager(private val repo: Repository, private val renderer: PageRend
                 val x = File(dir, "TA Statement_$tag.xlsx"); val pdf = File(dir, "Invoices & Supporting_$tag.pdf")
                 writeAtomically(x) { TaStatementWorkbook.write(data, it) }
                 writeAtomically(pdf) { CombinedPdfBuilder.build(data, docs, it) }
+                if (id != null) signOutputs(id, trip.claimNumber, x, pdf)
                 perEntity += Triple(en, x, pdf)
             }
         }
@@ -213,16 +232,46 @@ class ExportManager(private val repo: Repository, private val renderer: PageRend
                     perEntity.forEach { (en, x, pdf) ->
                         val folder = FileNamer.safeFileName(en.label)
                         put("$folder/${x.name}", x); put("$folder/${pdf.name}", pdf)
+                        signatureOf(x).let { sig -> put("$folder/${sig.name}", sig) }
                     }
                 } else p.zipEntries.forEach { (path, file, _) -> put(path, file) }
                 put(out.excel.name, out.excel)
                 put(out.pdf.name, out.pdf)
+                put(signatureOf(out.excel).name, signatureOf(out.excel))
             }
         }
-        repo.trips.update(trip.copy(outputsGeneratedAt = System.currentTimeMillis()))
+        repo.trips.update(repo.touchTrip(trip.copy(outputsGeneratedAt = System.currentTimeMillis())))
         val splitNote = if (perEntity.isNotEmpty()) ", split across ${perEntity.size} entities" else ""
         repo.logEvent(tripId, EventType.GENERATED, "Generated TA statement (₹%.2f, %d bills%s)".format(p.data.total, p.data.lines.size, splitNote))
         outputsFor(trip)
+    }
+
+    /** Detached signature file for an Excel statement ("<name>.xlsx.p7s"). */
+    fun signatureOf(f: File) = File(f.parentFile, f.name + ".p7s")
+
+    /**
+     * PDF: embedded digital signature (any PDF reader can check it). Excel: a detached ".p7s"
+     * signature next to it. Large PDFs (over 80 MB) get a detached signature instead.
+     */
+    private fun signOutputs(id: Pair<DocSigner, X509Certificate>, claimNo: String, excel: File, pdf: File) {
+        val (signer, cert) = id
+        val name = Regex("CN=([^,]+)").find(cert.subjectX500Principal.name)?.groupValues?.get(1) ?: "TA Reimburse user"
+        try {
+            signatureOf(excel).writeBytes(Signing.cmsDetached(excel.readBytes(), signer, cert))
+            if (pdf.length() <= 80L * 1024 * 1024) {
+                val signed = PdfSigner.sign(pdf.readBytes(), signer, cert, name, "TA claim $claimNo prepared and confirmed by $name")
+                writeAtomically(pdf) { it.write(signed) }
+            } else signatureOf(pdf).writeBytes(Signing.cmsDetached(pdf.readBytes(), signer, cert))
+        } catch (e: Throwable) {
+            // Signing is best-effort: outputs stay valid and usable without it.
+            signatureOf(excel).delete(); signatureOf(pdf).delete()
+        }
+    }
+
+    private fun documentSuffix(): String {
+        val alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+        val r = java.security.SecureRandom()
+        return (1..4).map { alphabet[r.nextInt(alphabet.length)] }.joinToString("")
     }
 
     private inline fun writeAtomically(target: File, block: (java.io.OutputStream) -> Unit) {

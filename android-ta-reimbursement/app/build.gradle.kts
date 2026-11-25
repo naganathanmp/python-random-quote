@@ -58,6 +58,7 @@ android {
         unitTests.all {
             it.maxHeapSize = "3g"
             it.systemProperty("robolectric.dependency.repo.url", "https://maven-central.storage-download.googleapis.com/maven2/")
+            it.systemProperty("ta.debug", "1")
         }
     }
     lint {

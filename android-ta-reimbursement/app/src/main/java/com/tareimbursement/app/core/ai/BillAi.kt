@@ -72,11 +72,16 @@ Categories: restaurant, meals, food delivery and hotel room stay are BOARDING; c
     }
 
     /** Full prompt in the model's chat format. */
-    fun prompt(ocrText: String, ctx: BillContext, family: ModelFamily): String {
+    /** Marks where a vision model receives the bill picture. */
+    const val IMAGE_SLOT = "<<IMAGE>>"
+
+    fun prompt(ocrText: String, ctx: BillContext, family: ModelFamily, withImage: Boolean = false): String {
         val user = userMessage(ocrText, ctx)
         return when (family) {
             ModelFamily.QWEN -> "<|im_start|>system\n$INSTRUCTIONS<|im_end|>\n<|im_start|>user\n$user<|im_end|>\n<|im_start|>assistant\n{"
-            ModelFamily.GEMMA -> "<start_of_turn>user\n$INSTRUCTIONS\n\n$user<end_of_turn>\n<start_of_turn>model\n{"
+            ModelFamily.GEMMA -> if (withImage)
+                "<start_of_turn>user\n$INSTRUCTIONS\nThe bill picture:\n$IMAGE_SLOT\nOCR text of the same bill (may have reading errors; trust the picture):\n$user<end_of_turn>\n<start_of_turn>model\n{"
+            else "<start_of_turn>user\n$INSTRUCTIONS\n\n$user<end_of_turn>\n<start_of_turn>model\n{"
         }
     }
 

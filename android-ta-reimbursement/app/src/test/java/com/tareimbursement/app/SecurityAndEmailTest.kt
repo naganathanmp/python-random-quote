@@ -86,7 +86,7 @@ class SecurityAndEmailTest {
     @Test fun importerWithStrictPolicyRejectsPrivateFiles() = runBlocking {
         val db = AppDatabase.inMemory(ctx)
         val repo = Repository(db, ctx.filesDir)
-        val importer = FileImporter(ctx.contentResolver, repo, FakeExtractor(), ctx.cacheDir) { UriPolicy.isAllowedForImport(ctx, it) }
+        val importer = FileImporter(ctx.contentResolver, repo, FakeExtractor(), ctx.cacheDir, uriAllowed = { UriPolicy.isAllowedForImport(ctx, it) })
         val trip = repo.createTrip(TripEntity(title = "T", clientName = "C", projectCode = "P", location = "L", purpose = "Internal Audit", startEpochDay = 20000, endEpochDay = 20001))
         val secret = File(ctx.filesDir, "secret.txt").apply { writeText("Grand Total 999") }
         val cam = File(ctx.cacheDir, "camera/bill.jpg").apply { parentFile?.mkdirs(); writeBytes(jpeg) }

@@ -86,6 +86,7 @@ fun SettingsScreen(nav: NavHostController, modifier: Modifier) {
                 SettingRow(Icons.Outlined.Person, profile.name, "${profile.employeeCode}${if (profile.designation.isNotBlank()) " · ${profile.designation}" else ""}\nClaims e-mailed to: ${profile.approverEmail.ifBlank { "not set" }}") { nav.navigate("profile") }
             }
         }
+        item { AiSettingsCard() }
         item {
             SectionCard(title = "Policy limits") {
                 SettingRow(Icons.Outlined.Gavel, "Per-bill limits & own-vehicle rate", "Own vehicle ₹${Fmt.amountInput(c.prefs.mileageRate)}/km · " + if (limits.isEmpty()) "no per-bill limits set" else limits.entries.joinToString { "${it.key.shortLabel} ${Fmt.inr(it.value)}" }) { limitsOpen = true }
@@ -105,7 +106,7 @@ fun SettingsScreen(nav: NavHostController, modifier: Modifier) {
                 Row(verticalAlignment = Alignment.Top) {
                     Icon(Icons.Outlined.Lock, null, tint = MaterialTheme.colorScheme.secondary)
                     Spacer(Modifier.width(12.dp))
-                    Text("Bills are read on this phone using on-device text recognition. Your invoices, client details and statements are stored only in the app's private storage and are never uploaded. Files leave the phone only when you choose Download, E-mail or Share.",
+                    Text("Bills are read on this phone (text scanner + optional on-device AI); no AI service or cloud reads them. Claims stay in the app's private storage. Only if you turn on Team sharing for a project are that project's bills and chat sent to the team server you set up, over HTTPS. Otherwise files leave the phone only when you choose Download, E-mail or Share.",
                         style = MaterialTheme.typography.bodySmall)
                 }
             }

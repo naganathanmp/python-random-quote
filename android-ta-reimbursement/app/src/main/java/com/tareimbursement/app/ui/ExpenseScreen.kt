@@ -90,7 +90,6 @@ import com.tareimbursement.app.service.JobState
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 
-private val paymentModes = listOf("UPI", "Card", "Cash", "Net banking", "Wallet", "Company paid")
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -111,13 +110,14 @@ fun ExpenseScreen(expenseId: Long, nav: NavHostController) {
     var billNo by rememberSaveable { mutableStateOf("") }
     var description by rememberSaveable { mutableStateOf("") }
     var category by rememberSaveable { mutableStateOf<String?>(null) }
-    var payment by rememberSaveable { mutableStateOf("") }
     var mode by rememberSaveable { mutableStateOf("") }
     var km by rememberSaveable { mutableStateOf("") }
     var perKm by rememberSaveable { mutableStateOf("") }
     var toll by rememberSaveable { mutableStateOf("") }
     var route by rememberSaveable { mutableStateOf("") }
-    var remarks by rememberSaveable { mutableStateOf("") }
+    var moreOpen by rememberSaveable { mutableStateOf(false) }
+    var snapshot by rememberSaveable { mutableStateOf("") }
+    var ackReason by rememberSaveable { mutableStateOf("") }
     var tried by rememberSaveable { mutableStateOf(false) }
     var showText by rememberSaveable { mutableStateOf(false) }
     var confirmDelete by rememberSaveable { mutableStateOf(false) }
@@ -126,6 +126,7 @@ fun ExpenseScreen(expenseId: Long, nav: NavHostController) {
     var others by remember { mutableStateOf<List<ExpenseEntity>>(emptyList()) }
     var dupOf by remember { mutableStateOf<ExpenseEntity?>(null) }
     var readOnly by remember { mutableStateOf(false) }
+    var tripShared by remember { mutableStateOf(false) }
     // Foreign currency, billing entity and travellers' shares.
     var currency by rememberSaveable { mutableStateOf("INR") }
     var foreignAmt by rememberSaveable { mutableStateOf("") }
@@ -144,12 +145,21 @@ fun ExpenseScreen(expenseId: Long, nav: NavHostController) {
             description = e.description.ifBlank { TravelMode.defaultRemark(e.categoryEnum ?: e.suggestedEnum, e.nature, e.vendor) }
             mode = e.modeOfTravel
             km = Fmt.amountInput(e.mileageKm?.takeIf { it > 0 }); perKm = Fmt.amountInput(e.mileageRate); toll = Fmt.amountInput(e.tollAmount?.takeIf { it > 0 })
-            category = e.category; payment = e.paymentMode; remarks = e.remarks
+            category = e.category
             currency = e.currency; foreignAmt = Fmt.amountInput(e.foreignAmount); rate = e.exchangeRate?.let { Fmt.amountInput(it) }.orEmpty()
             // Only a user-fixed entity is shown as chosen; auto-assigned bills show "Auto".
             entityId = if (e.entityLocked) e.entityId else null
             if (e.shares.isNotBlank()) { shareText = ShareEdit.fromStored(e.shares); sharesInit = true }
+            moreOpen = moreOpen || billNo.isNotBlank() && e.confirmed
+            snapshot = listOf(date, amount, vendor, billNo, description, category, mode, currency, foreignAmt, rate).joinToString("|")
             loaded = true
+        }
+    }
+    // The on-device AI finished while the screen is open: show its reading if nothing was typed yet.
+    LaunchedEffect(e?.aiState, e?.updatedAt) {
+        if (e != null && loaded && e.aiState == "DONE" && !e.confirmed) {
+            val now = listOf(date, amount, vendor, billNo, description, category, mode, currency, foreignAmt, rate).joinToString("|")
+            if (now == snapshot && (e.dateEpochDay != date || Fmt.amountInput(e.amount) != amount || e.description != description || e.vendor != vendor)) loaded = false
         }
     }
     LaunchedEffect(e?.duplicateOfId, e?.tripId, atts.size) {
@@ -158,6 +168,7 @@ fun ExpenseScreen(expenseId: Long, nav: NavHostController) {
         dupOf = e.duplicateOfId?.takeIf { it > 0 }?.let { c.repo.expenses.get(it) }
         val trip = c.repo.trips.get(e.tripId)
         readOnly = trip?.isArchived == true
+        tripShared = trip?.shared == true
         split = trip?.split ?: SplitMode.NONE
         ents = c.repo.entities.forTrip(e.tripId)
         people = c.repo.travellers.forTrip(e.tripId)
@@ -196,7 +207,8 @@ fun ExpenseScreen(expenseId: Long, nav: NavHostController) {
 
     fun build(confirm: Boolean): ExpenseEntity? = e?.copy(
         dateEpochDay = date, amount = amountValue?.let { Math.round(it * 100) / 100.0 }, vendor = vendor.trim(), billNo = billNo.trim(),
-        description = description.trim(), category = category, paymentMode = payment, remarks = remarks.trim(),
+        description = description.trim(), category = category,
+        userEdited = e.userEdited || listOf(date, amount, vendor, billNo, description, category, mode, currency, foreignAmt, rate).joinToString("|") != snapshot,
         confirmed = if (confirm) true else e.confirmed && category != null && amountValue != null && date != null,
         currency = currency, foreignAmount = if (isForeign) foreignValue else null, exchangeRate = if (isForeign) rateValue else null,
         entityId = entityId, entityLocked = entityId != null,
@@ -276,7 +288,13 @@ fun ExpenseScreen(expenseId: Long, nav: NavHostController) {
             if (jobs[c.jobs.importKey(e.tripId)] is JobState.Running) LinearProgressIndicator(Modifier.fillMaxWidth())
             if (atts.isEmpty()) Text("No bill attached — this will be shown as a self-declared expense. Add a photo or file if you have one.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
-            // --------------- duplicate warning
+            // --------------- AI reading, metadata date, trust check, duplicates in other claims
+            BillNotices(e, readOnly, ackReason, { ackReason = it },
+                onAck = { scope.launch(kotlinx.coroutines.Dispatchers.Main.immediate) { build(false)?.let { c.repo.saveExpense(it) }; c.repo.acknowledgeTrust(e.id, ackReason); ackReason = "" } },
+                onDelete = { confirmDelete = true },
+                onDiscuss = if (tripShared) ({ nav.navigate(Routes.chat(e.tripId, e.uid)) }) else null)
+
+            // --------------- duplicate warning (same claim: merge)
             dupOf?.let { d ->
                 Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
                     Column(Modifier.padding(12.dp)) {
@@ -345,15 +363,20 @@ fun ExpenseScreen(expenseId: Long, nav: NavHostController) {
                     style = MaterialTheme.typography.bodySmall, color = if (amountValue != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            OutlinedTextField(vendor, { vendor = it }, label = { Text("Vendor / particulars") }, singleLine = true, readOnly = readOnly,
-                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words), modifier = Modifier.fillMaxWidth())
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedTextField(billNo, { billNo = it }, label = { Text("Bill / invoice no.") }, singleLine = true, readOnly = readOnly, modifier = Modifier.weight(1f))
-                PaymentModeField(payment, { if (!readOnly) payment = it }, Modifier.weight(1f))
-            }
-            OutlinedTextField(description, { description = it }, label = { Text("Remarks – mandatory (e.g. Uber Bangalore to Hosur)") }, readOnly = readOnly,
-                isError = tried && description.isBlank(), supportingText = if (tried && description.isBlank()) { { Text("Remarks are mandatory in the TA annexure") } } else null,
+            OutlinedTextField(description, { description = it }, label = { Text("Remarks * (e.g. Uber Bangalore to Hosur)") }, readOnly = readOnly,
+                isError = tried && description.isBlank(),
+                supportingText = { Text(if (tried && description.isBlank()) "Remarks are mandatory - they appear in the Annexure and on the PDF" else "Shown in the Excel annexure and on top of this bill in the PDF") },
                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences), modifier = Modifier.fillMaxWidth())
+            Row(Modifier.fillMaxWidth().clickable { moreOpen = !moreOpen }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("More details" + (if (!moreOpen) listOf(vendor, billNo).filter { it.isNotBlank() }.joinToString(" · ").let { if (it.isBlank()) "" else ": $it" } else ""),
+                    style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Icon(if (moreOpen) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore, null)
+            }
+            if (moreOpen) Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(vendor, { vendor = it }, label = { Text("Vendor") }, singleLine = true, readOnly = readOnly,
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words), modifier = Modifier.weight(1.4f))
+                OutlinedTextField(billNo, { billNo = it }, label = { Text("Bill no.") }, singleLine = true, readOnly = readOnly, modifier = Modifier.weight(1f))
+            }
 
             // --------------- accounting head
             HorizontalDivider()
@@ -424,8 +447,6 @@ fun ExpenseScreen(expenseId: Long, nav: NavHostController) {
                     style = MaterialTheme.typography.bodySmall, color = if (sharesOk) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error)
             }
 
-            OutlinedTextField(remarks, { remarks = it }, label = { Text("Remarks (shown in Annexure)") }, readOnly = readOnly, modifier = Modifier.fillMaxWidth())
-
             if (e.ocrText.isNotBlank()) {
                 Row(Modifier.fillMaxWidth().clickable { showText = !showText }.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("Text read from the bill", style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
@@ -490,19 +511,6 @@ fun CategoryDropdown(value: ExpenseCategory?, onChange: (ExpenseCategory) -> Uni
             ExpenseCategory.entries.forEach { cat ->
                 DropdownMenuItem(text = { Text(cat.label) }, leadingIcon = { Icon(categoryIcon(cat), null) }, onClick = { onChange(cat); open = false })
             }
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun PaymentModeField(value: String, onChange: (String) -> Unit, modifier: Modifier) {
-    var open by remember { mutableStateOf(false) }
-    ExposedDropdownMenuBox(open, { open = it }, modifier) {
-        OutlinedTextField(value, {}, readOnly = true, label = { Text("Paid by") }, trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(open) },
-            singleLine = true, modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable))
-        ExposedDropdownMenu(open, { open = false }) {
-            (listOf("") + paymentModes).forEach { m -> DropdownMenuItem(text = { Text(m.ifEmpty { "—" }) }, onClick = { onChange(m); open = false }) }
         }
     }
 }

@@ -21,7 +21,7 @@ sealed class JobState {
  * Long-running work (reading bills, generating outputs) runs in an app-wide scope so it
  * survives screen rotation and navigation; screens observe progress by key.
  */
-class Jobs(private val importer: FileImporter, private val exporter: ExportManager) {
+class Jobs(private val importer: FileImporter, private val exporter: ExportManager, private val afterImport: (Long) -> Unit = {}) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val _states = MutableStateFlow<Map<String, JobState>>(emptyMap())
     val states: StateFlow<Map<String, JobState>> = _states
@@ -41,6 +41,7 @@ class Jobs(private val importer: FileImporter, private val exporter: ExportManag
             try {
                 val r = importer.importUris(tripId, uris, attachTo) { p -> set(key, JobState.Running(p.current, p.done, p.total)) }
                 set(key, JobState.ImportDone(r))
+                afterImport(tripId)
             } catch (e: Throwable) {
                 set(key, JobState.Failed(e.message ?: "Import failed"))
             }

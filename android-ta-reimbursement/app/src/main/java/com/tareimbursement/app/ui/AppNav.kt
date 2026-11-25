@@ -51,6 +51,11 @@ object Routes {
     fun generate(id: Long) = "generate/$id"
     fun claim(id: Long) = "claim/$id"
     fun viewer(id: Long) = "viewer/$id"
+    /** Team chat of a shared claim; [billUid] opens it focused on one bill ("Discuss this bill"). */
+    fun chat(tripId: Long, billUid: String = "") = "chat/$tripId?bill=$billUid"
+    fun team(tripId: Long) = "team/$tripId"
+    const val VERIFY = "verify"
+    const val ACCOUNT = "account"
 }
 
 @Composable
@@ -71,6 +76,12 @@ fun AppNav(nav: NavHostController = rememberNavController()) {
         composable("generate/{id}", idArg) { GenerateScreen(it.arguments!!.getLong("id"), nav) }
         composable("claim/{id}", idArg) { ClaimScreen(it.arguments!!.getLong("id"), nav) }
         composable("viewer/{id}", idArg) { ViewerScreen(it.arguments!!.getLong("id"), nav) }
+        composable("chat/{id}?bill={bill}", listOf(navArgument("id") { type = NavType.LongType }, navArgument("bill") { type = NavType.StringType; defaultValue = "" })) {
+            ChatScreen(it.arguments!!.getLong("id"), it.arguments!!.getString("bill").orEmpty(), nav)
+        }
+        composable("team/{id}", idArg) { TeamScreen(it.arguments!!.getLong("id"), nav) }
+        composable(Routes.VERIFY) { VerifyScreen(nav) }
+        composable(Routes.ACCOUNT) { AccountScreen(nav) }
         composable("profile") { ProfileScreen(onboarding = false, onBack = { nav.popBackStack() }, onDone = { nav.popBackStack() }) }
     }
     if (profile.isComplete) SharedFilesDialog(nav)

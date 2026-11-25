@@ -24,15 +24,18 @@ interface TripDao {
 
     @Query(
         """SELECT t.id, t.title, t.clientName, t.projectCode, t.location, t.startEpochDay, t.endEpochDay, t.advance, t.status,
-           t.claimNumber, t.submittedAt, t.paidAt, t.paidAmount, t.createdAt, t.budget,
-           COALESCE((SELECT SUM(e.amount) FROM expenses e WHERE e.tripId = t.id), 0) AS total,
-           (SELECT COUNT(*) FROM expenses e WHERE e.tripId = t.id) AS expenseCount,
-           (SELECT COUNT(*) FROM expenses e WHERE e.tripId = t.id AND e.confirmed = 0) AS pendingCount
+           t.claimNumber, t.submittedAt, t.paidAt, t.paidAmount, t.createdAt, t.budget, t.shared,
+           (SELECT COUNT(*) FROM messages m WHERE m.tripId = t.id AND m.createdAt > t.chatReadAt) AS unread,
+           COALESCE((SELECT SUM(e.amount) FROM expenses e WHERE e.tripId = t.id AND e.deleted = 0), 0) AS total,
+           (SELECT COUNT(*) FROM expenses e WHERE e.tripId = t.id AND e.deleted = 0) AS expenseCount,
+           (SELECT COUNT(*) FROM expenses e WHERE e.tripId = t.id AND e.deleted = 0 AND e.confirmed = 0) AS pendingCount
            FROM trips t ORDER BY CASE WHEN t.status = 'DRAFT' THEN t.createdAt ELSE COALESCE(t.submittedAt, t.createdAt) END DESC"""
     )
     fun observeWithStats(): Flow<List<TripWithStats>>
 
     @Query("SELECT COUNT(*) FROM trips WHERE claimNumber LIKE :prefix || '%'") suspend fun countClaimPrefix(prefix: String): Int
+    @Query("SELECT * FROM trips WHERE uid = :uid") suspend fun byUid(uid: String): TripEntity?
+    @Query("SELECT * FROM trips WHERE shared = 1") suspend fun sharedTrips(): List<TripEntity>
 }
 
 @Dao
@@ -42,10 +45,14 @@ interface ExpenseDao {
     @Delete suspend fun delete(e: ExpenseEntity)
     @Query("SELECT * FROM expenses WHERE id = :id") suspend fun get(id: Long): ExpenseEntity?
     @Query("SELECT * FROM expenses WHERE id = :id") fun observe(id: Long): Flow<ExpenseEntity?>
-    @Query("SELECT * FROM expenses WHERE tripId = :tripId ORDER BY COALESCE(dateEpochDay, 99999999), createdAt") suspend fun forTrip(tripId: Long): List<ExpenseEntity>
-    @Query("SELECT * FROM expenses WHERE tripId = :tripId ORDER BY COALESCE(dateEpochDay, 99999999), createdAt") fun observeForTrip(tripId: Long): Flow<List<ExpenseEntity>>
-    @Query("SELECT * FROM expenses") fun observeAll(): Flow<List<ExpenseEntity>>
-    @Query("SELECT * FROM expenses") suspend fun all(): List<ExpenseEntity>
+    @Query("SELECT * FROM expenses WHERE tripId = :tripId AND deleted = 0 ORDER BY COALESCE(dateEpochDay, 99999999), createdAt") suspend fun forTrip(tripId: Long): List<ExpenseEntity>
+    @Query("SELECT * FROM expenses WHERE tripId = :tripId AND deleted = 0 ORDER BY COALESCE(dateEpochDay, 99999999), createdAt") fun observeForTrip(tripId: Long): Flow<List<ExpenseEntity>>
+    @Query("SELECT * FROM expenses WHERE deleted = 0") fun observeAll(): Flow<List<ExpenseEntity>>
+    @Query("SELECT * FROM expenses WHERE deleted = 0") suspend fun all(): List<ExpenseEntity>
+    @Query("SELECT * FROM expenses WHERE uid = :uid") suspend fun byUid(uid: String): ExpenseEntity?
+    /** Includes soft-deleted rows (sync). */
+    @Query("SELECT * FROM expenses WHERE tripId = :tripId AND dirty = 1") suspend fun dirtyForTrip(tripId: Long): List<ExpenseEntity>
+    @Query("SELECT * FROM expenses WHERE aiState = 'QUEUED' AND deleted = 0 ORDER BY createdAt") suspend fun aiQueue(): List<ExpenseEntity>
     @Query("UPDATE expenses SET duplicateOfId = NULL WHERE duplicateOfId = :id") suspend fun clearDuplicateRefs(id: Long)
 }
 
@@ -55,11 +62,14 @@ interface AttachmentDao {
     @Update suspend fun update(a: AttachmentEntity)
     @Delete suspend fun delete(a: AttachmentEntity)
     @Query("SELECT * FROM attachments WHERE id = :id") suspend fun get(id: Long): AttachmentEntity?
-    @Query("SELECT * FROM attachments WHERE expenseId = :expenseId ORDER BY isPrimary DESC, addedAt") suspend fun forExpense(expenseId: Long): List<AttachmentEntity>
-    @Query("SELECT * FROM attachments WHERE expenseId = :expenseId ORDER BY isPrimary DESC, addedAt") fun observeForExpense(expenseId: Long): Flow<List<AttachmentEntity>>
-    @Query("SELECT * FROM attachments WHERE tripId = :tripId ORDER BY isPrimary DESC, addedAt") suspend fun forTrip(tripId: Long): List<AttachmentEntity>
-    @Query("SELECT * FROM attachments WHERE tripId = :tripId ORDER BY isPrimary DESC, addedAt") fun observeForTrip(tripId: Long): Flow<List<AttachmentEntity>>
+    @Query("SELECT * FROM attachments WHERE expenseId = :expenseId AND deleted = 0 ORDER BY isPrimary DESC, addedAt") suspend fun forExpense(expenseId: Long): List<AttachmentEntity>
+    @Query("SELECT * FROM attachments WHERE expenseId = :expenseId AND deleted = 0 ORDER BY isPrimary DESC, addedAt") fun observeForExpense(expenseId: Long): Flow<List<AttachmentEntity>>
+    @Query("SELECT * FROM attachments WHERE tripId = :tripId AND deleted = 0 ORDER BY isPrimary DESC, addedAt") suspend fun forTrip(tripId: Long): List<AttachmentEntity>
+    @Query("SELECT * FROM attachments WHERE tripId = :tripId AND deleted = 0 ORDER BY isPrimary DESC, addedAt") fun observeForTrip(tripId: Long): Flow<List<AttachmentEntity>>
     @Query("UPDATE attachments SET expenseId = :to, isPrimary = 0 WHERE expenseId = :from") suspend fun moveAll(from: Long, to: Long)
+    @Query("SELECT * FROM attachments WHERE uid = :uid") suspend fun byUid(uid: String): AttachmentEntity?
+    @Query("SELECT * FROM attachments WHERE deleted = 0") suspend fun all(): List<AttachmentEntity>
+    @Query("SELECT * FROM attachments WHERE tripId = :tripId AND dirty = 1") suspend fun dirtyForTrip(tripId: Long): List<AttachmentEntity>
 }
 
 @Dao
@@ -75,6 +85,7 @@ interface TravellerDao {
     @Update suspend fun update(t: TravellerEntity)
     @Delete suspend fun delete(t: TravellerEntity)
     @Query("SELECT * FROM travellers WHERE tripId = :tripId ORDER BY isSelf DESC, sortOrder, id") suspend fun forTrip(tripId: Long): List<TravellerEntity>
+    @Query("SELECT * FROM travellers WHERE uid = :uid") suspend fun byUid(uid: String): TravellerEntity?
     @Query("SELECT * FROM travellers WHERE tripId = :tripId ORDER BY isSelf DESC, sortOrder, id") fun observeForTrip(tripId: Long): Flow<List<TravellerEntity>>
 }
 
@@ -89,9 +100,20 @@ interface BillingEntityDao {
     @Query("UPDATE expenses SET entityId = NULL, entityLocked = 0 WHERE entityId = :entityId") suspend fun unassign(entityId: Long)
 }
 
+@Dao
+interface MessageDao {
+    @Insert suspend fun insert(m: MessageEntity): Long
+    @Update suspend fun update(m: MessageEntity)
+    @Query("SELECT * FROM messages WHERE tripId = :tripId ORDER BY createdAt, id") fun observeForTrip(tripId: Long): Flow<List<MessageEntity>>
+    @Query("SELECT * FROM messages WHERE tripId = :tripId ORDER BY createdAt, id") suspend fun forTrip(tripId: Long): List<MessageEntity>
+    @Query("SELECT * FROM messages WHERE uid = :uid") suspend fun byUid(uid: String): MessageEntity?
+    @Query("SELECT * FROM messages WHERE tripId = :tripId AND sent = 0 ORDER BY createdAt") suspend fun unsent(tripId: Long): List<MessageEntity>
+    @Query("SELECT MAX(createdAt) FROM messages WHERE tripId = :tripId AND sent = 1") suspend fun lastSentAt(tripId: Long): Long?
+}
+
 @Database(
-    entities = [TripEntity::class, ExpenseEntity::class, AttachmentEntity::class, TripEventEntity::class, TravellerEntity::class, BillingEntity::class],
-    version = 3, exportSchema = true,
+    entities = [TripEntity::class, ExpenseEntity::class, AttachmentEntity::class, TripEventEntity::class, TravellerEntity::class, BillingEntity::class, MessageEntity::class],
+    version = 4, exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun trips(): TripDao
@@ -100,6 +122,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun events(): EventDao
     abstract fun travellers(): TravellerDao
     abstract fun billingEntities(): BillingEntityDao
+    abstract fun messages(): MessageDao
 
     companion object {
         const val NAME = "ta.db"

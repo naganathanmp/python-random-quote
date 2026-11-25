@@ -82,6 +82,8 @@ data class StatementData(
     val entities: List<EntityInfo> = emptyList(),
     /** Set for a per-entity statement: only that entity's bills are in [lines]. */
     val billedTo: EntityInfo? = null,
+    /** Who prepared the outputs and how (printed as the authenticity declaration). */
+    val provenance: Provenance? = null,
 ) {
     val total: Double get() = lines.sumOf { it.amount }
     val hasForeign: Boolean get() = lines.any { it.isForeign }
@@ -93,4 +95,39 @@ data class StatementData(
     val netPayable: Double get() = total - claim.advance
     fun categoryTotal(c: ExpenseCategory) = lines.filter { it.category == c }.sumOf { it.amount }
     val days: Long get() = claim.endDate.toEpochDay() - claim.startDate.toEpochDay() + 1
+}
+
+/**
+ * Authenticity declaration printed on the Excel annexure and the combined PDF. Worded truthfully:
+ * a person prepared and confirmed the claim; when the on-device AI helped read bills it says so.
+ */
+data class Provenance(
+    val documentId: String,
+    val preparedBy: String,
+    val preparedAt: java.time.LocalDateTime,
+    val appVersion: String,
+    /** The on-device AI helped read at least one bill. */
+    val aiAssisted: Boolean,
+    /** Bills the trust check flagged that the person kept, with their reasons. */
+    val flaggedKept: List<String> = emptyList(),
+    /** Name in the signing certificate, null when the outputs are not signed. */
+    val signer: String? = null,
+) {
+    private val fmt = java.time.format.DateTimeFormatter.ofPattern("dd-MMM-yyyy HH:mm", java.util.Locale.ENGLISH)
+
+    fun paragraphs(): List<String> = buildList {
+        add("This TA statement was prepared by $preparedBy using the TA Reimburse app (v$appVersion) on ${preparedAt.format(fmt)}. " +
+            "Every bill was reviewed and confirmed by $preparedBy before this document was generated.")
+        add(
+            if (aiAssisted) "Bills were read on the phone by text recognition and an on-device AI assistant that only suggests values; " +
+                "no amount, date or bill in this claim was created by AI - each value was checked against the bill and confirmed by a person."
+            else "Bills were read on the phone by text recognition; every value was checked against the bill and confirmed by a person. No AI was used to create any bill or value."
+        )
+        add("Each uploaded file was checked for signs of AI generation, editing and duplication (in this and earlier claims). " +
+            if (flaggedKept.isEmpty()) "No file was flagged." else "${flaggedKept.size} flagged bill(s) were kept after review: ${flaggedKept.joinToString("; ")}.")
+        add(
+            if (signer != null) "Digitally signed by $signer. Document ID: $documentId. Any change to the PDF after signing breaks the signature (check it in Adobe Reader's Signature panel or in the app under Settings > Verify a document)."
+            else "Document ID: $documentId."
+        )
+    }
 }

@@ -13,6 +13,8 @@ import com.tareimbursement.app.core.FileNamer
 import com.tareimbursement.app.core.InsightExpense
 import com.tareimbursement.app.core.InsightTrip
 import com.tareimbursement.app.core.ParsedReceipt
+import com.tareimbursement.app.core.trust.BillPrint
+import com.tareimbursement.app.core.trust.Duplicates
 import java.io.File
 import java.time.Instant
 import java.time.LocalDate
@@ -35,6 +37,26 @@ class Repository(val db: AppDatabase, val filesDir: File) {
     val events = db.events()
     val travellers = db.travellers()
     val entities = db.billingEntities()
+    val messages = db.messages()
+
+    /** Called after local changes on a shared claim (schedules a sync). Set by the app. */
+    @Volatile var onLocalChange: (Long) -> Unit = {}
+
+    suspend fun touchA(a: AttachmentEntity): AttachmentEntity =
+        if (trips.get(a.tripId)?.shared == true) { onLocalChange(a.tripId); a.copy(dirty = true) } else a
+
+    /** Stamps a changed claim; team claims are marked for upload. */
+    fun touchTrip(t: TripEntity): TripEntity {
+        if (t.shared) onLocalChange(t.id)
+        return t.copy(updatedAt = System.currentTimeMillis(), dirty = t.dirty || t.shared)
+    }
+
+    /** Stamps a changed bill; on team claims it is marked for upload. */
+    suspend fun touch(e: ExpenseEntity): ExpenseEntity {
+        val shared = trips.get(e.tripId)?.shared == true
+        if (shared) onLocalChange(e.tripId)
+        return e.copy(updatedAt = System.currentTimeMillis(), dirty = e.dirty || shared)
+    }
 
     fun tripDir(tripId: Long) = File(filesDir, "trips/$tripId")
     fun attachmentDir(tripId: Long) = File(tripDir(tripId), "att").apply { mkdirs() }
@@ -71,6 +93,7 @@ class Repository(val db: AppDatabase, val filesDir: File) {
             else travellers.update(o.copy(tripId = tripId, isSelf = false, sortOrder = i + 1, name = o.name.trim(), employeeCode = o.employeeCode.trim()))
         }
         resplitShares(tripId)
+        trips.get(tripId)?.let { if (it.shared) trips.update(touchTrip(it)) }
     }
 
     /** Drops shares of removed travellers; bills with no valid shares are split equally among everyone. */
@@ -79,7 +102,7 @@ class Repository(val db: AppDatabase, val filesDir: File) {
         val ids = people.map { it.id }
         expenses.forTrip(tripId).forEach { e ->
             val newShares = normalizedShares(e, ids)
-            if (newShares != e.shares) expenses.update(e.copy(shares = newShares))
+            if (newShares != e.shares) expenses.update(touch(e.copy(shares = newShares)))
         }
     }
 
@@ -98,7 +121,7 @@ class Repository(val db: AppDatabase, val filesDir: File) {
 
     suspend fun saveEntities(tripId: Long, mode: SplitMode, list: List<BillingEntity>) = db.withTransaction {
         val t = trips.get(tripId) ?: return@withTransaction
-        trips.update(t.copy(splitMode = mode.name))
+        trips.update(touchTrip(t.copy(splitMode = mode.name)))
         val existing = entities.forTrip(tripId)
         val keep = list.filter { it.id != 0L }.map { it.id }.toSet()
         existing.filter { it.id !in keep }.forEach { entities.unassign(it.id); entities.delete(it) }
@@ -121,7 +144,7 @@ class Repository(val db: AppDatabase, val filesDir: File) {
         val result = BillingSplit.allocate(items, ents.map { it.sharePercent })
         if (t.split == SplitMode.AUTO) list.forEach { e ->
             val idx = result.assignment[e.id] ?: return@forEach
-            if (e.entityId != ents[idx].id) expenses.update(e.copy(entityId = ents[idx].id))
+            if (e.entityId != ents[idx].id) expenses.update(touch(e.copy(entityId = ents[idx].id)))
         }
         result
     }
@@ -131,7 +154,7 @@ class Repository(val db: AppDatabase, val filesDir: File) {
         expenses.forTrip(tripId).filter { it.currency == currency && it.exchangeRate != null }.maxByOrNull { it.createdAt }?.exchangeRate
 
     suspend fun updateTrip(t: TripEntity) {
-        trips.update(t)
+        trips.update(touchTrip(t))
         events.insert(log(t.id, EventType.UPDATED, "Claim details updated"))
     }
 
@@ -183,7 +206,7 @@ class Repository(val db: AppDatabase, val filesDir: File) {
                 ocrText = ocrText.take(20000),
             )
         )
-        expenses.get(id)?.let { e -> normalizedShares(e, people).takeIf { it != e.shares }?.let { expenses.update(e.copy(shares = it)) } }
+        expenses.get(id)?.let { e -> normalizedShares(e, people).takeIf { it != e.shares }?.let { expenses.update(touch(e.copy(shares = it))) } }
         return id
     }
 
@@ -211,50 +234,83 @@ class Repository(val db: AppDatabase, val filesDir: File) {
             modeOfTravel = e.modeOfTravel.ifBlank { if (e.categoryEnum != null) TravelMode.suggest(e.categoryEnum, e.ocrText, e.vendor) else "" },
         )
         val withShares = base.copy(shares = normalizedShares(base, travellers.forTrip(e.tripId).map { it.id }))
-        expenses.update(withShares.copy(duplicateOfId = if (e.duplicateOfId == 0L) 0L else dup?.id))
+        expenses.update(touch(withShares.copy(duplicateOfId = if (e.duplicateOfId == 0L) 0L else dup?.id)))
     }
 
     suspend fun deleteExpense(id: Long) {
         val e = expenses.get(id) ?: return
         attachments.forExpense(id).forEach { fileOf(it).delete() }
         expenses.clearDuplicateRefs(id)
-        expenses.delete(e)
+        // Team claims keep a tombstone so the deletion reaches everyone's phone.
+        if (trips.get(e.tripId)?.shared == true) expenses.update(touch(e.copy(deleted = true)))
+        else expenses.delete(e)
+    }
+
+    // ------------------------------------------------------------ duplicates (this and other claims)
+
+    suspend fun billPrints(): List<BillPrint> {
+        val titles = trips.all().associate { it.id to it.title }
+        val byExpense = attachments.all().groupBy { it.expenseId }
+        return expenses.all().flatMap { e ->
+            val atts = byExpense[e.id].orEmpty()
+            val base = BillPrint(e.id, e.tripId, titles[e.tripId].orEmpty(), null, null, e.date, e.amount, e.vendor.ifBlank { null }, e.billNo.ifBlank { null })
+            if (atts.isEmpty()) listOf(base) else atts.map { a -> base.copy(sha256 = a.sha256.ifBlank { null }, dHash = a.dHash) }
+        }
+    }
+
+    /** Re-checks one bill against every other bill on the phone; returns the note shown to the person. */
+    suspend fun refreshDuplicates(expenseId: Long, prints: List<BillPrint>? = null): String {
+        val e = expenses.get(expenseId) ?: return ""
+        val all = prints ?: billPrints()
+        val mine = all.filter { it.expenseId == e.id }
+        val hits = mine.flatMap { Duplicates.find(it, all) }.sortedByDescending { it.strong }
+        val note = hits.firstOrNull()?.reason.orEmpty()
+        val strong = hits.firstOrNull()?.strong == true
+        if (note != e.dupNote || strong != e.dupStrong) expenses.update(touch(e.copy(dupNote = note, dupStrong = strong, trustAck = if (note.isBlank() && e.trustLevel != "WARN") "" else e.trustAck)))
+        return note
+    }
+
+    /** Keeps a flagged bill (trust warning or duplicate) with the person's reason. */
+    suspend fun acknowledgeTrust(expenseId: Long, reason: String) {
+        val e = expenses.get(expenseId) ?: return
+        expenses.update(touch(e.copy(trustAck = reason.trim())))
+        logEvent(e.tripId, EventType.UPDATED, "Flagged bill kept: ${reason.trim()}")
     }
 
     /** Merges [sourceId] into [targetId]: its files become supporting documents of the target. */
     suspend fun mergeExpense(sourceId: Long, targetId: Long) = db.withTransaction {
         val src = expenses.get(sourceId) ?: return@withTransaction
         val tgt = expenses.get(targetId) ?: return@withTransaction
-        attachments.moveAll(sourceId, targetId)
+        attachments.forExpense(sourceId).forEach { attachments.update(touchA(it.copy(expenseId = targetId, isPrimary = false))) }
         expenses.clearDuplicateRefs(sourceId)
-        expenses.delete(src)
-        expenses.update(tgt.copy(
+        if (trips.get(src.tripId)?.shared == true) expenses.update(touch(src.copy(deleted = true))) else expenses.delete(src)
+        expenses.update(touch(tgt.copy(
             vendor = tgt.vendor.ifBlank { src.vendor }, billNo = tgt.billNo.ifBlank { src.billNo },
             dateEpochDay = tgt.dateEpochDay ?: src.dateEpochDay, amount = tgt.amount ?: src.amount,
             ocrText = (tgt.ocrText + "\n" + src.ocrText).take(20000),
-        ))
+        )))
     }
 
     suspend fun moveAttachment(attachmentId: Long, toExpenseId: Long) {
         val a = attachments.get(attachmentId) ?: return
         val from = a.expenseId
-        attachments.update(a.copy(expenseId = toExpenseId, isPrimary = attachments.forExpense(toExpenseId).none { it.isPrimary }))
+        attachments.update(touchA(a.copy(expenseId = toExpenseId, isPrimary = attachments.forExpense(toExpenseId).none { it.isPrimary })))
         // Keep exactly one primary document on the source expense if any remain.
         val rest = attachments.forExpense(from)
-        if (rest.isNotEmpty() && rest.none { it.isPrimary }) attachments.update(rest.first().copy(isPrimary = true))
+        if (rest.isNotEmpty() && rest.none { it.isPrimary }) attachments.update(touchA(rest.first().copy(isPrimary = true)))
     }
 
     suspend fun setPrimary(attachmentId: Long) {
         val a = attachments.get(attachmentId) ?: return
-        attachments.forExpense(a.expenseId).forEach { attachments.update(it.copy(isPrimary = it.id == attachmentId)) }
+        attachments.forExpense(a.expenseId).forEach { attachments.update(touchA(it.copy(isPrimary = it.id == attachmentId))) }
     }
 
     suspend fun deleteAttachment(attachmentId: Long) {
         val a = attachments.get(attachmentId) ?: return
         fileOf(a).delete()
-        attachments.delete(a)
+        if (trips.get(a.tripId)?.shared == true) attachments.update(touchA(a.copy(deleted = true))) else attachments.delete(a)
         val rest = attachments.forExpense(a.expenseId)
-        if (rest.isNotEmpty() && rest.none { it.isPrimary }) attachments.update(rest.first().copy(isPrimary = true))
+        if (rest.isNotEmpty() && rest.none { it.isPrimary }) attachments.update(touchA(rest.first().copy(isPrimary = true)))
     }
 
     suspend fun logEvent(tripId: Long, type: String, message: String) { events.insert(log(tripId, type, message)) }
@@ -291,7 +347,12 @@ class Repository(val db: AppDatabase, val filesDir: File) {
                 if (d.isBefore(trip.startDate.minusDays(1)) || d.isAfter(trip.endDate.plusDays(1)))
                     out += ValidationIssue(e.id, "$label: date ${d.format(DateTimeFormatter.ofPattern("dd MMM yyyy"))} is outside the travel period (e.g. advance booking or payment date) — please verify.", false)
             }
-            if ((e.duplicateOfId ?: 0) > 0) out += ValidationIssue(e.id, "$label: possible duplicate of another bill with the same date & amount.", false)
+            when {
+                e.trustBlocked -> out += ValidationIssue(e.id, "$label: this file looks AI-generated (${e.trust.summary}). It can't be claimed - delete it and upload the original bill.", true)
+                e.needsTrustAck -> out += ValidationIssue(e.id, "$label: ${listOf(e.trust.summary.takeIf { e.trustLevel == "WARN" }, e.dupNote.takeIf { e.dupStrong }).filterNotNull().joinToString(" ")} Open the bill and confirm it with a reason.", true)
+                e.dupNote.isNotBlank() && !e.dupStrong && e.trustAck.isBlank() -> out += ValidationIssue(e.id, "$label: ${e.dupNote} Please check it is not claimed twice.", false)
+                e.dupNote.isBlank() && (e.duplicateOfId ?: 0) > 0 -> out += ValidationIssue(e.id, "$label: possible duplicate of another bill with the same date & amount.", false)
+            }
             if (!e.isMileage && (e.noBill || attachments.forExpense(e.id).isEmpty())) out += ValidationIssue(e.id, "$label: no bill attached (Sup Bills = N) — give clear details in the remarks.", false)
             val limit = e.categoryEnum?.let { limits[it] }
             if (limit != null && (e.amount ?: 0.0) > limit) out += ValidationIssue(e.id, "$label: ₹${e.amount} exceeds your policy limit of ₹$limit for ${e.categoryEnum!!.label}.", false)
@@ -323,31 +384,31 @@ class Repository(val db: AppDatabase, val filesDir: File) {
 
     suspend fun submit(tripId: Long) {
         val t = trips.get(tripId) ?: return
-        trips.update(t.copy(status = ClaimStatus.SUBMITTED.name, submittedAt = System.currentTimeMillis()))
+        trips.update(touchTrip(t.copy(status = ClaimStatus.SUBMITTED.name, submittedAt = System.currentTimeMillis())))
         events.insert(log(tripId, EventType.SUBMITTED, "Statement completed, submitted and archived"))
     }
 
     suspend fun markApproved(tripId: Long, on: LocalDate) {
         val t = trips.get(tripId) ?: return
-        trips.update(t.copy(status = ClaimStatus.APPROVED.name, approvedAt = millis(on)))
+        trips.update(touchTrip(t.copy(status = ClaimStatus.APPROVED.name, approvedAt = millis(on))))
         events.insert(log(tripId, EventType.APPROVED, "Claim approved"))
     }
 
     suspend fun markPaid(tripId: Long, amount: Double, on: LocalDate) {
         val t = trips.get(tripId) ?: return
-        trips.update(t.copy(status = ClaimStatus.PAID.name, paidAt = millis(on), paidAmount = amount, approvedAt = t.approvedAt ?: millis(on)))
+        trips.update(touchTrip(t.copy(status = ClaimStatus.PAID.name, paidAt = millis(on), paidAmount = amount, approvedAt = t.approvedAt ?: millis(on))))
         events.insert(log(tripId, EventType.PAID, "Reimbursement of ₹%.2f received".format(amount)))
     }
 
     suspend fun markRejected(tripId: Long, reason: String) {
         val t = trips.get(tripId) ?: return
-        trips.update(t.copy(status = ClaimStatus.REJECTED.name, notes = if (reason.isBlank()) t.notes else (t.notes + "\nRejected: " + reason).trim()))
+        trips.update(touchTrip(t.copy(status = ClaimStatus.REJECTED.name, notes = if (reason.isBlank()) t.notes else (t.notes + "\nRejected: " + reason).trim())))
         events.insert(log(tripId, EventType.REJECTED, "Claim returned/rejected" + if (reason.isNotBlank()) ": $reason" else ""))
     }
 
     suspend fun reopen(tripId: Long) {
         val t = trips.get(tripId) ?: return
-        trips.update(t.copy(status = ClaimStatus.DRAFT.name, approvedAt = null, paidAt = null, paidAmount = null))
+        trips.update(touchTrip(t.copy(status = ClaimStatus.DRAFT.name, approvedAt = null, paidAt = null, paidAmount = null)))
         events.insert(log(tripId, EventType.REOPENED, "Claim reopened for editing"))
     }
 

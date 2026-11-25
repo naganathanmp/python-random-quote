@@ -124,6 +124,6 @@ class BackupManager(private val context: Context, private val db: () -> AppDatab
         const val MAX_ENTRIES = 20_000
         const val MAX_BYTES = 4L * 1024 * 1024 * 1024
         /** Keep in sync with @Database(version). */
-        const val DB_VERSION = 3
+        const val DB_VERSION = 4
     }
 }

@@ -250,6 +250,47 @@ class SplitWorkflowTest {
         ctx.deleteDatabase("migrate2.db")
     }
 
+    /** A database from v1.3.0 opens in v2.0.0: data kept, the two remarks merged into one, every row gets a unique uid. */
+    @Test fun migrationFrom3To4MergesRemarks() {
+        ctx.deleteDatabase("migrate3.db")
+        val schema = JSONObject(File("schemas/com.tareimbursement.app.data.AppDatabase/3.json").readText()).getJSONObject("database")
+        val path = ctx.getDatabasePath("migrate3.db").apply { parentFile?.mkdirs() }
+        SQLiteDatabase.openOrCreateDatabase(path, null).use { raw ->
+            val entities = schema.getJSONArray("entities")
+            for (i in 0 until entities.length()) {
+                val e = entities.getJSONObject(i)
+                raw.execSQL(e.getString("createSql").replace("\${TABLE_NAME}", e.getString("tableName")))
+                val idx = e.optJSONArray("indices")
+                if (idx != null) for (j in 0 until idx.length()) raw.execSQL(idx.getJSONObject(j).getString("createSql").replace("\${TABLE_NAME}", e.getString("tableName")))
+            }
+            val setup = schema.getJSONArray("setupQueries")
+            for (i in 0 until setup.length()) raw.execSQL(setup.getString(i))
+            raw.execSQL("INSERT INTO trips (id,title,clientName,projectCode,location,purpose,startEpochDay,endEpochDay,advance,status,claimNumber,createdAt,notes,currency,splitMode,onwardBookedBy,returnBookedBy,dailyLimitPerPerson) VALUES (1,'V13 trip','Client','P1','Hosur','Audit',20000,20002,0,'DRAFT','TA-202407-001',5,'','INR','NONE','Office','Self Booking',0)")
+            val cols = "tripId,vendor,billNo,suggestionReason,suggestionAlternatives,nature,paymentMode,confirmed,noBill,dateConfident,amountConfident,ocrText,createdAt,currency,entityLocked,shares,modeOfTravel"
+            raw.execSQL("INSERT INTO expenses (id,description,remarks,$cols) VALUES (1,'Uber Bangalore to Hosur','client meeting',1,'Uber','','','','','UPI',1,0,1,1,'',7,'INR',0,'','Cab')")
+            raw.execSQL("INSERT INTO expenses (id,description,remarks,$cols) VALUES (2,'','Lunch with team',1,'Cafe','','','','','',1,0,1,1,'',8,'INR',0,'','NA')")
+            raw.execSQL("INSERT INTO expenses (id,description,remarks,$cols) VALUES (3,'Hotel stay 2 nights','hotel stay',1,'Hotel','','','','','Card',1,0,1,1,'',9,'INR',0,'','NA')")
+            raw.version = 3
+        }
+        val migrated = androidx.room.Room.databaseBuilder(ctx, AppDatabase::class.java, "migrate3.db").addMigrations(*com.tareimbursement.app.data.Migrations.ALL).allowMainThreadQueries().build()
+        runBlocking {
+            val es = migrated.expenses().forTrip(1).sortedBy { it.id }
+            assertEquals("Uber Bangalore to Hosur - client meeting", es[0].description)
+            assertEquals("Lunch with team", es[1].description)
+            assertEquals("Hotel stay 2 nights", es[2].description)
+            assertTrue(es.all { it.remarks.isEmpty() && it.paymentMode.isEmpty() && it.trustLevel == "OK" && !it.deleted })
+            assertEquals(3, es.map { it.uid }.toSet().size)
+            assertTrue(es.all { java.util.UUID.fromString(it.uid) != null })
+            val t = migrated.trips().get(1)!!
+            assertTrue(t.uid.length == 36 && !t.shared)
+            assertEquals(5L, t.updatedAt)
+            migrated.messages().insert(com.tareimbursement.app.data.MessageEntity(tripId = 1, body = "hi"))
+            assertEquals(1, migrated.messages().forTrip(1).size)
+        }
+        migrated.close()
+        ctx.deleteDatabase("migrate3.db")
+    }
+
     @Test fun manualSplitRequiresAssignment() = runBlocking {
         val tripId = trip()
         val a = bill(tripId, 1000.0, 11, ExpenseCategory.LOCAL_CONVEYANCE, "Uber")

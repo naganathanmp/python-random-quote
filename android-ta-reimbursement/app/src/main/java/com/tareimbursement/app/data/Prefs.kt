@@ -53,6 +53,24 @@ class Prefs(context: Context) {
         _limits.value = readLimits()
     }
 
+    /** On-device AI reads new bills after OCR (when a model is installed). */
+    var aiEnabled: Boolean
+        get() = sp.getBoolean("ai_enabled", true)
+        set(v) { sp.edit().putBoolean("ai_enabled", v).apply() }
+
+    /** Download the AI model only on Wi-Fi. */
+    var aiWifiOnly: Boolean
+        get() = sp.getBoolean("ai_wifi_only", true)
+        set(v) { sp.edit().putBoolean("ai_wifi_only", v).apply() }
+
+    /** Team sync server (Supabase project URL + public anon key). Empty = team features off. */
+    var serverUrl: String
+        get() = sp.getString("server_url", "")!!
+        set(v) { sp.edit().putString("server_url", v.trim().trimEnd('/')).apply() }
+    var serverKey: String
+        get() = sp.getString("server_key", "")!!
+        set(v) { sp.edit().putString("server_key", v.trim()).apply() }
+
     /** Default own-vehicle reimbursement rate per km (₹). */
     var mileageRate: Double
         get() = sp.getFloat("mileage_rate", 7.5f).toDouble()

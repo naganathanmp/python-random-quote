@@ -35,17 +35,17 @@ object ModelCatalog {
         minRamGb = 4, vision = false, gated = false, license = "Apache-2.0",
     )
     val GEMMA_3N = AiModel(
-        "gemma-3n-e2b", "Gemma 3n E2B (reads the bill image)", ModelFamily.GEMMA,
+        "gemma-3n-e2b", "Gemma 3n E2B (larger, most accurate)", ModelFamily.GEMMA,
         "google/gemma-3n-E2B-it-litert-preview", "gemma-3n-E2B-it-int4.task",
         3_136_226_711L, null,
-        minRamGb = 8, vision = true, gated = true, license = "Gemma Terms of Use",
+        minRamGb = 8, vision = false, gated = true, license = "Gemma Terms of Use",
     )
     val all = listOf(GEMMA_3N, QWEN_1_5B, QWEN_0_5B)
 
     fun byId(id: String?) = all.firstOrNull { it.id == id }
 
     /**
-     * Auto-pick by phone: 8 GB+ RAM and a Hugging Face token → Gemma 3n (vision); 6 GB+ → Qwen 1.5B;
+     * Auto-pick by phone: 8 GB+ RAM and a Hugging Face token → Gemma 3n; 6 GB+ → Qwen 1.5B;
      * 4 GB+ → Qwen 0.5B; smaller phones keep the built-in reader only.
      */
     fun recommend(totalRamBytes: Long, hasHfToken: Boolean): AiModel? {
