@@ -53,6 +53,8 @@ interface ExpenseDao {
     /** Includes soft-deleted rows (sync). */
     @Query("SELECT * FROM expenses WHERE tripId = :tripId AND dirty = 1") suspend fun dirtyForTrip(tripId: Long): List<ExpenseEntity>
     @Query("SELECT * FROM expenses WHERE aiState = 'QUEUED' AND deleted = 0 ORDER BY createdAt") suspend fun aiQueue(): List<ExpenseEntity>
+    /** Clears the upload flag unless the bill changed again meanwhile. */
+    @Query("UPDATE expenses SET dirty = 0 WHERE id = :id AND updatedAt = :ts") suspend fun clearDirty(id: Long, ts: Long)
     @Query("UPDATE expenses SET duplicateOfId = NULL WHERE duplicateOfId = :id") suspend fun clearDuplicateRefs(id: Long)
 }
 
