@@ -18,27 +18,21 @@ project and the data; nothing goes to the app's developer.
    It creates the tables, row-level security (each person sees only projects they own or were
    invited to), the invite function and a private `bills` storage bucket. It is safe to run again.
 
-## 3. Sign-in by e-mail code
+## 3. Sign-in e-mails
 
-1. **Authentication → Sign In / Providers → Email**: keep **Email** enabled. Turn **Confirm email**
-   on (default).
-2. **Authentication → Emails → Templates → Magic Link**: make the e-mail show the 6-digit code.
-   Replace the body with, for example:
-
-   ```html
-   <h2>Your TA Reimburse sign-in code</h2>
-   <p>Enter this code in the app: <strong>{{ .Token }}</strong></p>
-   <p>It expires in 1 hour. If you did not ask for it, ignore this e-mail.</p>
-   ```
-
-   Do the same for the **Confirm signup** template (first sign-in of a new person).
-3. Supabase's built-in e-mail sender is limited to a few e-mails per hour. For a team, add your
-   own SMTP under **Authentication → Emails → SMTP Settings** (e.g. your firm's Office 365 / Google
-   Workspace SMTP, or a service like Brevo / Amazon SES).
+1. **Authentication → URL Configuration**: set **Site URL** to `tareimburse://auth` and add
+   `tareimburse://auth` under **Redirect URLs**. The sign-in link in the e-mail then opens the app
+   and signs the person in (choose *TA Reimburse* if the phone asks which app to open). The person
+   can also long-press the link, copy it, and paste it in Settings → Team sharing.
+2. Free plan limits with Supabase's built-in e-mail sender: **only 2 sign-in e-mails per hour**
+   for the whole project, and the e-mail text can't be changed (it shows a link, not a code).
+   For a team, add your own sender under **Authentication → Emails → SMTP Settings**, e.g.
+   Brevo (free, 300 e-mails/day: host `smtp-relay.brevo.com`, port 587) or a Gmail account with an
+   App Password (`smtp.gmail.com`, port 587). Then you can also change the **Magic Link** and
+   **Confirm signup** templates to show the 6-digit code `{{ .Token }}`.
 
 **Sign-in by mobile number (optional, paid SMS):** Authentication → Sign In / Providers → **Phone**,
-choose an SMS provider (Twilio, MessageBird, Vonage, Textlocal) and enter its keys. Members can then
-sign in and be invited with their mobile number.
+choose an SMS provider (Twilio, MessageBird, Vonage, Textlocal) and enter its keys.
 
 ## 4. Give the app the server details
 

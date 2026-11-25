@@ -116,6 +116,9 @@ fun AccountScreen(nav: NavHostController) {
     var serverMsg by remember { mutableStateOf<String?>(null) }
     var signedIn by remember { mutableStateOf(c.supabase.signedIn) }
     val syncErr by c.sync.lastError.collectAsState()
+    var link by rememberSaveable { mutableStateOf("") }
+    // Signing in by tapping the e-mail link happens outside this screen: pick it up here.
+    LaunchedEffect(signedIn) { while (!signedIn) { delay(1000); if (c.supabase.signedIn) signedIn = true } }
     val syncing by c.sync.syncing.collectAsState()
 
     fun run(block: suspend () -> Unit) = scope.launch(Dispatchers.Main.immediate) {
@@ -161,15 +164,19 @@ fun AccountScreen(nav: NavHostController) {
                         }
                         syncErr?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                     } else {
-                        Text("Use the e-mail (or mobile number) your project owner invited. A 6-digit code is sent to it - no password.", style = MaterialTheme.typography.bodySmall)
+                        Text("Use the e-mail (or mobile number) your project owner invited. You get a sign-in e-mail - no password. Open it on this phone and tap the link (choose TA Reimburse if asked), or enter the code if the e-mail shows one.", style = MaterialTheme.typography.bodySmall)
                         OutlinedTextField(contact, { contact = it }, label = { Text("E-mail or mobile number") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email))
-                        if (sent) OutlinedTextField(otp, { v -> if (v.length <= 8 && v.all { it.isDigit() }) otp = v }, label = { Text("6-digit code") }, singleLine = true,
+                        if (sent) OutlinedTextField(link, { link = it.trim() }, label = { Text("…or paste the link from the e-mail") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                        if (sent && (link.startsWith("http") || link.startsWith("tareimburse:"))) TextButton(enabled = !busy, onClick = {
+                            run { c.supabase.signInWithLink(link); signedIn = true; link = ""; SyncWorker.schedule(ctx); c.sync.syncAll() }
+                        }) { Text("Sign in with this link") }
+                        if (sent) OutlinedTextField(otp, { v -> if (v.length <= 8 && v.all { it.isDigit() }) otp = v }, label = { Text("Code from the e-mail (if shown)") }, singleLine = true,
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword), modifier = Modifier.fillMaxWidth())
                         Row {
                             Button(enabled = !busy && SupabaseClient.isValidContact(contact), onClick = {
                                 if (!c.supabase.let { com.tareimbursement.app.service.sync.ServerConfig(c.prefs.serverUrl, c.prefs.serverKey).valid }) { msg = "Save the team server first"; return@Button }
-                                run { c.supabase.sendCode(SupabaseClient.normalizeContact(contact)); sent = true; msg = "Code sent to ${SupabaseClient.normalizeContact(contact)}" }
+                                run { c.supabase.sendCode(SupabaseClient.normalizeContact(contact)); sent = true; msg = "Sign-in e-mail sent to ${SupabaseClient.normalizeContact(contact)}" }
                             }) { Text(if (sent) "Resend code" else "Send code") }
                             Spacer(Modifier.width(8.dp))
                             if (sent) Button(enabled = !busy && otp.length >= 6, onClick = {
@@ -183,7 +190,7 @@ fun AccountScreen(nav: NavHostController) {
                         }
                     }
                     if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-                    msg?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = if (it.startsWith("Code sent")) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error) }
+                    msg?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = if (it.startsWith("Sign-in e-mail sent")) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error) }
                 }
             }
             item {

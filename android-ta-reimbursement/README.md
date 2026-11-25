@@ -7,9 +7,9 @@ Bills are read on the phone (text recognition + an optional open-source AI model
 phone). Internet is used only to download that AI model once and, if you turn it on, to share a
 project with your team through your firm's own server.
 
-**Install:** copy `release/TA-Reimburse-v2.0.0.apk` to your phone, open it and allow
+**Install:** copy `release/TA-Reimburse-v2.0.1.apk` to your phone, open it and allow
 "Install unknown apps" for your file manager / browser when Android asks. Android 10 or newer.
-v2.0.0 installs over any earlier version and keeps existing claims (database upgraded automatically).
+v2.0.1 installs over any earlier version and keeps existing claims (database upgraded automatically).
 
 ## What's new in 2.0.0
 

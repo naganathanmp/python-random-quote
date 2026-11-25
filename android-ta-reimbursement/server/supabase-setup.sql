@@ -134,7 +134,8 @@ alter table public.messages        enable row level security;
 drop policy if exists projects_select on public.projects;
 drop policy if exists projects_insert on public.projects;
 drop policy if exists projects_update on public.projects;
-create policy projects_select on public.projects for select to authenticated using (public.ta_is_member(id));
+-- "owner = auth.uid()" also lets the owner's first upsert pass (Postgres checks the read rule on the new row of an upsert).
+create policy projects_select on public.projects for select to authenticated using (owner = auth.uid() or public.ta_is_member(id));
 create policy projects_insert on public.projects for insert to authenticated with check (owner = auth.uid());
 create policy projects_update on public.projects for update to authenticated using (owner = auth.uid()) with check (owner = auth.uid());
 

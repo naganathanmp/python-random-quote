@@ -9,18 +9,36 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import com.tareimbursement.app.ui.AppNav
 import com.tareimbursement.app.ui.TaTheme
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        if (savedInstanceState == null) handleShare(intent)
+        if (savedInstanceState == null) { handleShare(intent); handleSignInLink(intent) }
         setContent { TaTheme { AppNav() } }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         handleShare(intent)
+        handleSignInLink(intent)
+    }
+
+    /** tareimburse://auth#access_token=… from the sign-in e-mail: finish signing in to Team sharing. */
+    internal fun handleSignInLink(intent: Intent?) {
+        val data = intent?.data ?: return
+        if (intent.action != Intent.ACTION_VIEW || data.scheme != "tareimburse" || data.host != "auth") return
+        val c = container
+        c.appScope.launch {
+            val msg = try {
+                c.supabase.signInWithLink(data.toString())
+                com.tareimbursement.app.service.sync.SyncWorker.schedule(this@MainActivity)
+                try { c.sync.syncAll() } catch (_: Exception) { }
+                "Signed in to Team sharing as ${c.supabase.session?.contact}"
+            } catch (e: Exception) { e.message ?: "Sign-in failed" }
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { android.widget.Toast.makeText(this@MainActivity, msg, android.widget.Toast.LENGTH_LONG).show() }
+        }
     }
 
     /**

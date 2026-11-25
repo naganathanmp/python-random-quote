@@ -48,6 +48,13 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- Sign-in link from the team server's e-mail opens the app. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="tareimburse" android:host="auth" />
+            </intent-filter>
             <!-- Allow "Share to TA Reimbursement" from gallery / file managers / mail apps -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />

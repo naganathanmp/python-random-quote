@@ -160,6 +160,25 @@ class TeamSyncTest {
         assertFalse(b.client.signedIn)
     }
 
+    @Test fun signInFromTheEmailLink() {
+        val a = Phone("l", "Asha")
+        a.client.sendCode("asha@x.com")
+        assertTrue(fake.lastOtpPath.contains("redirect_to=tareimburse%3A%2F%2Fauth"))
+        // 1. Pasted verify link from the default Supabase e-mail.
+        fake.links["pkce_abc123"] = "asha@x.com"
+        val s1 = a.client.signInWithLink("https://proj.supabase.co/auth/v1/verify?token=pkce_abc123&type=magiclink&redirect_to=tareimburse://auth")
+        assertEquals("asha@x.com", s1.email)
+        try { a.client.signInWithLink("https://proj.supabase.co/auth/v1/verify?token=pkce_abc123&type=magiclink"); fail("reused link accepted") } catch (e: ApiException) { }
+        // 2. The app link the server redirects to after the link is tapped.
+        val uid = fake.users.getValue("asha@x.com").id
+        val s2 = a.client.signInWithLink("tareimburse://auth#access_token=tok-$uid&expires_in=3600&refresh_token=ref-$uid&token_type=bearer&type=magiclink")
+        assertEquals(uid, s2.userId); assertTrue(a.client.signedIn)
+        // 3. A forged token is refused by the server.
+        try { a.client.signInWithLink("tareimburse://auth#access_token=forged&refresh_token=x"); fail("forged token accepted") } catch (e: ApiException) { }
+        // 4. Expired link message.
+        try { a.client.signInWithLink("tareimburse://auth#error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid+or+has+expired"); fail() } catch (e: ApiException) { assertTrue(e.message!!.contains("expired")) }
+    }
+
     @Test fun phoneNumbersAreNormalised() {
         assertEquals("+919812345678", SupabaseClient.normalizePhone("98123 45678"))
         assertEquals("+919812345678", SupabaseClient.normalizePhone("098123-45678"))

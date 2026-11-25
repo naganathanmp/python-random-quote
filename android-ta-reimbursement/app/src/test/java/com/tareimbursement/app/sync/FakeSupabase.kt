@@ -20,6 +20,9 @@ class FakeSupabase : Dispatcher() {
     val members = mutableListOf<JSONObject>()
     val tables = mapOf("expenses" to linkedMapOf<String, JSONObject>(), "attachments" to linkedMapOf(), "messages" to linkedMapOf())
     val files = mutableMapOf<String, ByteArray>()
+    /** One-time e-mail link tokens (token_hash -> contact). */
+    val links = mutableMapOf<String, String>()
+    var lastOtpPath = ""
     private var clock = 0L
     var requests = 0
 
@@ -49,9 +52,13 @@ class FakeSupabase : Dispatcher() {
 
         // ---------------- auth
         when (path) {
-            "/auth/v1/otp" -> return json(200, "{}")
+            "/auth/v1/otp" -> { lastOtpPath = full; return json(200, "{}") }
             "/auth/v1/verify" -> {
                 val b = JSONObject(body)
+                if (b.has("token_hash")) {
+                    val contact = links.remove(b.getString("token_hash")) ?: return err(403, "Email link is invalid or has expired")
+                    return json(200, session(users.getOrPut(contact) { User(UUID.randomUUID().toString(), contact) }))
+                }
                 if (b.optString("token") != "123456") return err(403, "Token has expired or is invalid")
                 val contact = if (b.has("email")) b.getString("email") else b.getString("phone")
                 val u = users.getOrPut(contact) { User(UUID.randomUUID().toString(), contact) }
@@ -63,6 +70,10 @@ class FakeSupabase : Dispatcher() {
                 return json(200, session(u))
             }
             "/auth/v1/logout" -> return MockResponse().setResponseCode(204)
+            "/auth/v1/user" -> {
+                val u = userOf(request) ?: return err(401, "invalid JWT")
+                return json(200, session(u).getJSONObject("user"))
+            }
         }
         val u = userOf(request) ?: return err(401, "JWT expired")
 

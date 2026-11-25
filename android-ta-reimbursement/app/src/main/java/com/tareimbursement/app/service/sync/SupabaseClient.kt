@@ -54,7 +54,34 @@ class SupabaseClient(private val config: () -> ServerConfig, private val store: 
     fun sendCode(contact: String) {
         val body = JSONObject().put("create_user", true)
         if (contact.contains('@')) body.put("email", contact.trim().lowercase()) else body.put("phone", normalizePhone(contact))
-        call("POST", "/auth/v1/otp", body.toString(), auth = false)
+        // The e-mail's sign-in link opens the app (tareimburse://auth); the 6-digit code works too when the server's e-mail shows it.
+        call("POST", "/auth/v1/otp?redirect_to=" + URLEncoder.encode(APP_REDIRECT, "UTF-8"), body.toString(), auth = false)
+    }
+
+    /**
+     * Signs in from the link in the sign-in e-mail: either the app link the server redirects to
+     * (tareimburse://auth#access_token=…&refresh_token=…) or the e-mail's own verify link
+     * (…/auth/v1/verify?token=…&type=magiclink) copied and pasted into the app.
+     */
+    fun signInWithLink(link: String): Session {
+        val l = link.trim()
+        fun params(part: String) = part.split('&').mapNotNull { kv -> kv.split('=', limit = 2).takeIf { it.size == 2 }?.let { java.net.URLDecoder.decode(it[0], "UTF-8") to java.net.URLDecoder.decode(it[1], "UTF-8") } }.toMap()
+        val p = params(l.substringAfter('#', "")) + params(l.substringAfter('?', "").substringBefore('#'))
+        p["error_description"]?.let { throw ApiException(400, if (it.contains("expired", true) || it.contains("invalid", true)) "This sign-in link has expired or was already used. Request a new one." else it) }
+        val access = p["access_token"]; val refresh = p["refresh_token"]
+        val s = if (access != null && refresh != null) {
+            // Ask the server who this token belongs to (also proves it was issued by our server).
+            val c = open("GET", "/auth/v1/user", auth = false, headers = mapOf("Authorization" to "Bearer $access"))
+            val user = JSONObject(finish(c))
+            Session(access, refresh, now() + (p["expires_in"]?.toLongOrNull() ?: 3600) * 1000, user.getString("id"),
+                user.optString("email", "").lowercase(), user.optString("phone", ""))
+        } else {
+            val token = p["token"] ?: p["token_hash"] ?: throw ApiException(400, "That is not a TA Reimburse sign-in link. Copy the whole link from the e-mail.")
+            val type = p["type"]?.takeIf { it in setOf("magiclink", "signup", "email", "invite") } ?: "magiclink"
+            sessionFrom(JSONObject(call("POST", "/auth/v1/verify", JSONObject().put("type", type).put("token_hash", token).toString(), auth = false)))
+        }
+        cached = s; store.save(s)
+        return s
     }
 
     fun verifyCode(contact: String, code: String): Session {
@@ -134,7 +161,7 @@ class SupabaseClient(private val config: () -> ServerConfig, private val store: 
 
     private fun encPath(p: String) = p.split('/').joinToString("/") { URLEncoder.encode(it, "UTF-8").replace("+", "%20") }
 
-    private fun open(method: String, path: String, auth: Boolean, headers: Map<String, String> = emptyMap()): HttpURLConnection {
+    internal fun open(method: String, path: String, auth: Boolean, headers: Map<String, String> = emptyMap()): HttpURLConnection {
         val cfg = base()
         val c = URL(cfg.url.trimEnd('/') + path).openConnection() as HttpURLConnection
         c.requestMethod = method
@@ -156,7 +183,7 @@ class SupabaseClient(private val config: () -> ServerConfig, private val store: 
         return finish(c)
     }
 
-    private fun finish(c: HttpURLConnection): String {
+    internal fun finish(c: HttpURLConnection): String {
         try {
             val code = c.responseCode
             val text = (if (code in 200..299) c.inputStream else c.errorStream)?.use { it.readBytes().decodeToString() }.orEmpty()
@@ -177,6 +204,8 @@ class SupabaseClient(private val config: () -> ServerConfig, private val store: 
     }
 
     companion object {
+        const val APP_REDIRECT = "tareimburse://auth"
+
         /** "+91 98123 45678", "098123 45678", "9812345678" → "+919812345678" (India default). */
         fun normalizePhone(s: String): String {
             val digits = s.filter { it.isDigit() }
