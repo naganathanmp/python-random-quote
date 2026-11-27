@@ -147,7 +147,9 @@ class WorkflowTest {
         assertEquals(ExpenseCategory.PICKUP_DROP, ride.suggestedEnum)
         val lunch = list.first { it.amount == 504.0 }
         assertEquals("Food / restaurant bill", lunch.nature)
-        assertNull("category never auto-assigned: user must choose", lunch.category)
+        // v2.0.3: the suggested head is filled in automatically (the bill still needs the person's confirmation).
+        assertEquals(lunch.suggestedCategory, lunch.category)
+        assertFalse(lunch.confirmed)
         val air = list.first { it.vendor == "Fly91" }
         assertEquals(ExpenseCategory.AIR_FARE, air.suggestedEnum)
 

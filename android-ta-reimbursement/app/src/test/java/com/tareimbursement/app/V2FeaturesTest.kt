@@ -97,7 +97,8 @@ class V2FeaturesTest {
         val ai = BillAiResult(LocalDate.of(2026, 7, 21), 1830.0, "INR", "Spice Hut", null, ExpenseCategory.BOARDING, null, "Dinner at Spice Hut, Hosur", "Restaurant", emptyList())
         val merged = AiRunner.apply(base, ai)
         assertEquals(1830.0, merged.amount!!, 0.0)
-        assertEquals("Dinner at Spice Hut, Hosur", merged.description)
+        // House-style remark; the meal word comes from the AI when the bill shows no time.
+        assertEquals("Dinner - Spice Hut", merged.description)
         assertEquals("DONE", merged.aiState)
         assertTrue(merged.aiNote.contains("verify"))
         val edited = AiRunner.apply(base.copy(userEdited = true, description = "My words"), ai)
@@ -105,6 +106,26 @@ class V2FeaturesTest {
         assertEquals("My words", edited.description)
         assertTrue(edited.aiNote.contains("your values were kept"))
         assertEquals("FAILED", AiRunner.apply(base, null).aiState)
+    }
+
+    @Test fun manyFilesAtOnceEvenIfOneFails() = runBlocking {
+        val t = trip("Batch")
+        val failing = object : com.tareimbursement.app.service.TextExtractor {
+            override suspend fun extract(file: File, kind: com.tareimbursement.app.data.AttachmentKind, type: com.tareimbursement.app.core.SniffedType): String {
+                if (file.length() == 7L) throw OutOfMemoryError("huge photo")
+                return "Rapido\nBike\nPickup\n148, Halasuru, Bengaluru\nDrop\nBommasandra, Hosur Rd, Bengaluru\nDate 12/03/2026\nTotal Fare Rs 186.00"
+            }
+        }
+        val imp = FileImporter(ctx.contentResolver, repo, failing, ctx.cacheDir, dHash = { _, _ -> null })
+        val src = (1..4).map { i -> FileImporter.Source(File(tmp, "r$i.txt").apply { writeText(if (i == 2) "1234567" else "ride $i " + "x".repeat(i * 10)) }, "ride$i.txt") }
+        val r = imp.importFiles(t, src, null, File(tmp, "sb").apply { mkdirs() })
+        assertEquals(3, r.createdExpenseIds.size)
+        assertTrue(r.skipped.single().contains("ride2.txt"))
+        val e = repo.expenses.get(r.createdExpenseIds.first())!!
+        assertEquals(ExpenseCategory.LOCAL_CONVEYANCE.name, e.category)        // head filled in automatically
+        assertEquals("Rapido Bike from 148 Halasuru to Bommasandra Hosur Rd", e.description)
+        assertEquals("Bike", e.modeOfTravel)
+        assertFalse(e.confirmed)                                               // still reviewed by the person
     }
 
     @Test fun billsWhereTheAiCouldNotStartAreRetried() = runBlocking {

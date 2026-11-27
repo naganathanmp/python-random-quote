@@ -8,6 +8,7 @@ import com.tareimbursement.app.core.ClaimStatus
 import com.tareimbursement.app.core.Currencies
 import com.tareimbursement.app.core.Shares
 import com.tareimbursement.app.core.TravelMode
+import com.tareimbursement.app.core.RemarkWriter
 import com.tareimbursement.app.core.ExpenseCategory
 import com.tareimbursement.app.core.FileNamer
 import com.tareimbursement.app.core.InsightExpense
@@ -193,13 +194,14 @@ class Repository(val db: AppDatabase, val filesDir: File) {
                 exchangeRate = rate,
                 vendor = parsed?.vendor.orEmpty(),
                 billNo = parsed?.billNo.orEmpty(),
-                category = null,
+                // The suggested head is filled in straight away; the person still confirms every bill.
+                category = s?.category?.takeIf { s.nature != "Unknown" || parsed?.amount != null }?.name,
                 suggestedCategory = s?.category?.name,
                 suggestionReason = s?.reason.orEmpty(),
                 suggestionAlternatives = s?.alternatives?.joinToString(",") { it.name }.orEmpty(),
                 nature = s?.nature.orEmpty(),
-                description = TravelMode.defaultRemark(s?.category, s?.nature.orEmpty(), parsed?.vendor.orEmpty()),
-                modeOfTravel = TravelMode.suggest(s?.category, ocrText, parsed?.vendor.orEmpty()),
+                description = RemarkWriter.write(s?.category, ocrText, parsed?.vendor.orEmpty(), trip?.location.orEmpty(), s?.nature.orEmpty()),
+                modeOfTravel = RemarkWriter.mode(s?.category, ocrText, parsed?.vendor.orEmpty()),
                 duplicateOfId = dup?.id,
                 dateConfident = parsed?.dateConfident ?: false,
                 amountConfident = parsed?.amountConfident ?: false,
@@ -231,7 +233,7 @@ class Repository(val db: AppDatabase, val filesDir: File) {
         // duplicateOfId: null = none, 0 = user confirmed "not a duplicate", >0 = possible duplicate of that expense.
         val base = e.copy(
             amount = if (e.isMileage) TravelMode.mileageAmount(e.mileageKm!!, e.mileageRate!!, e.tollAmount) else e.amount,
-            modeOfTravel = e.modeOfTravel.ifBlank { if (e.categoryEnum != null) TravelMode.suggest(e.categoryEnum, e.ocrText, e.vendor) else "" },
+            modeOfTravel = e.modeOfTravel.ifBlank { if (e.categoryEnum != null) RemarkWriter.mode(e.categoryEnum, e.ocrText, e.vendor) else "" },
         )
         val withShares = base.copy(shares = normalizedShares(base, travellers.forTrip(e.tripId).map { it.id }))
         expenses.update(touch(withShares.copy(duplicateOfId = if (e.duplicateOfId == 0L) 0L else dup?.id)))

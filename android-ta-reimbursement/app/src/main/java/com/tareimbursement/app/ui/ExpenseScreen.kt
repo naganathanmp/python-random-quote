@@ -127,6 +127,16 @@ fun ExpenseScreen(expenseId: Long, nav: NavHostController) {
     var dupOf by remember { mutableStateOf<ExpenseEntity?>(null) }
     var readOnly by remember { mutableStateOf(false) }
     var tripShared by remember { mutableStateOf(false) }
+    var tripPlace by remember { mutableStateOf("") }
+    /** Picking another head rewrites the remark in that head's style, unless the person wrote their own. */
+    fun onHead(newCat: ExpenseCategory) {
+        val e0 = expense ?: return
+        val oldAuto = com.tareimbursement.app.core.RemarkWriter.write(ExpenseCategory.fromName(category), e0.ocrText, vendor, tripPlace, e0.nature)
+        if (description.isBlank() || description == oldAuto || description == e0.description && !e0.userEdited)
+            description = com.tareimbursement.app.core.RemarkWriter.write(newCat, e0.ocrText, vendor, tripPlace, e0.nature)
+        mode = com.tareimbursement.app.core.RemarkWriter.mode(newCat, e0.ocrText, vendor)
+        category = newCat.name
+    }
     // Foreign currency, billing entity and travellers' shares.
     var currency by rememberSaveable { mutableStateOf("INR") }
     var foreignAmt by rememberSaveable { mutableStateOf("") }
@@ -142,7 +152,7 @@ fun ExpenseScreen(expenseId: Long, nav: NavHostController) {
     LaunchedEffect(e?.id, e != null) {
         if (e != null && !loaded) {
             date = e.dateEpochDay; amount = Fmt.amountInput(e.amount); vendor = e.vendor; billNo = e.billNo
-            description = e.description.ifBlank { TravelMode.defaultRemark(e.categoryEnum ?: e.suggestedEnum, e.nature, e.vendor) }
+            description = e.description.ifBlank { com.tareimbursement.app.core.RemarkWriter.write(e.categoryEnum ?: e.suggestedEnum, e.ocrText, e.vendor, "", e.nature) }
             mode = e.modeOfTravel
             km = Fmt.amountInput(e.mileageKm?.takeIf { it > 0 }); perKm = Fmt.amountInput(e.mileageRate); toll = Fmt.amountInput(e.tollAmount?.takeIf { it > 0 })
             category = e.category
@@ -168,6 +178,7 @@ fun ExpenseScreen(expenseId: Long, nav: NavHostController) {
         dupOf = e.duplicateOfId?.takeIf { it > 0 }?.let { c.repo.expenses.get(it) }
         val trip = c.repo.trips.get(e.tripId)
         tripShared = trip?.shared == true
+        tripPlace = trip?.location.orEmpty()
         // Team members edit only their own bills (the server enforces the same rule).
         readOnly = trip?.isArchived == true || (tripShared && trip?.myRole == "MEMBER" && e.addedByUid != c.supabase.session?.userId)
         split = trip?.split ?: SplitMode.NONE
@@ -179,8 +190,10 @@ fun ExpenseScreen(expenseId: Long, nav: NavHostController) {
     LaunchedEffect(e) { if (e != null) seen = true else if (seen) nav.popBackStack() }
 
     val supportCamera = rememberCamera { uri -> e?.let { c.jobs.startImport(it.tripId, listOf(uri), it.id) } }
+    // Several files picked here: ask whether they are separate bills or documents for this bill.
+    var picked by remember { mutableStateOf<List<android.net.Uri>>(emptyList()) }
     val supportPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
-        if (uris.isNotEmpty()) e?.let { c.jobs.startImport(it.tripId, uris, it.id) }
+        if (uris.size == 1) e?.let { c.jobs.startImport(it.tripId, uris, it.id) } else if (uris.size > 1) picked = uris
     }
 
     val isForeign = currency != "INR"
@@ -214,7 +227,7 @@ fun ExpenseScreen(expenseId: Long, nav: NavHostController) {
         currency = currency, foreignAmount = if (isForeign) foreignValue else null, exchangeRate = if (isForeign) rateValue else null,
         entityId = entityId, entityLocked = entityId != null,
         shares = if (multi) Shares.format(shareMap) else "",
-        modeOfTravel = mode.trim().ifBlank { ExpenseCategory.fromName(category)?.let { TravelMode.suggest(it, e.ocrText, vendor) }.orEmpty() },
+        modeOfTravel = mode.trim().ifBlank { ExpenseCategory.fromName(category)?.let { com.tareimbursement.app.core.RemarkWriter.mode(it, e.ocrText, vendor) }.orEmpty() },
         mileageKm = if (isMileage) kmValue ?: 0.0 else null, mileageRate = if (isMileage) perKmValue else null, tollAmount = if (isMileage) tollValue ?: 0.0 else null,
     )
 
@@ -252,7 +265,7 @@ fun ExpenseScreen(expenseId: Long, nav: NavHostController) {
                                 return@Button
                             }
                             if (amountValue == null || amountValue <= 0 || date == null || category == null || !sharesOk || description.isBlank()) return@Button
-                            if (mode.isBlank()) { mode = TravelMode.suggest(ExpenseCategory.fromName(category), e?.ocrText.orEmpty(), vendor); if (mode.isBlank()) return@Button }
+                            if (mode.isBlank()) { mode = com.tareimbursement.app.core.RemarkWriter.mode(ExpenseCategory.fromName(category), e?.ocrText.orEmpty(), vendor); if (mode.isBlank()) return@Button }
                             if (split == SplitMode.MANUAL && ents.size >= 2 && ents.none { it.id == entityId }) return@Button
                             scope.launch(kotlinx.coroutines.Dispatchers.Main.immediate) {
                                 val updated = build(true) ?: return@launch
@@ -391,7 +404,7 @@ fun ExpenseScreen(expenseId: Long, nav: NavHostController) {
                         Column {
                             if (e.nature.isNotBlank()) Text("Nature of expense: ${e.nature}", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onPrimaryContainer)
                             Text(e.suggestionReason.ifBlank { "Suggested head: ${suggested?.label}" }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimaryContainer)
-                            if (suggested != null) Text("Suggested: ${suggested.label}. How would you like to classify this expense?", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                            if (suggested != null) Text(if (category == suggested.name) "Filled in: ${suggested.label}. Tap another head below to change it." else "Suggested: ${suggested.label}.", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onPrimaryContainer)
                         }
                     }
                 }
@@ -399,13 +412,13 @@ fun ExpenseScreen(expenseId: Long, nav: NavHostController) {
             val quick = (listOfNotNull(suggested) + e.alternatives).distinct()
             if (quick.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 quick.forEach { q ->
-                    FilterChip(selected = category == q.name, onClick = { if (!readOnly) { category = q.name; if (mode.isBlank()) mode = TravelMode.suggest(q, e.ocrText, vendor) } },
+                    FilterChip(selected = category == q.name, onClick = { if (!readOnly && category != q.name) onHead(q) },
                         label = { Text(q.label + if (q == suggested) "  (suggested)" else "") }, leadingIcon = { Icon(categoryIcon(q), null, Modifier.size(18.dp)) })
                 }
             }
-            CategoryDropdown(cat, { if (!readOnly) { category = it.name; if (mode.isBlank()) mode = TravelMode.suggest(it, e.ocrText, vendor) } }, isError = tried && category == null)
+            CategoryDropdown(cat, { if (!readOnly && category != it.name) onHead(it) }, isError = tried && category == null)
             cat?.takeIf { it.restricted }?.let { Text("Note: ${it.guidance.trim()}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary) }
-            ModeOfTravelField(mode, { if (!readOnly) mode = it }, isError = tried && mode.isBlank() && category != null && TravelMode.suggest(ExpenseCategory.fromName(category), e.ocrText, vendor).isBlank())
+            ModeOfTravelField(mode, { if (!readOnly) mode = it }, isError = tried && mode.isBlank() && category != null && com.tareimbursement.app.core.RemarkWriter.mode(ExpenseCategory.fromName(category), e.ocrText, vendor).isBlank())
             if (tried && category == null) Text("Choose how this expense should be classified.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
 
             if (split != SplitMode.NONE && ents.size >= 2) {
@@ -458,6 +471,14 @@ fun ExpenseScreen(expenseId: Long, nav: NavHostController) {
             Spacer(Modifier.height(24.dp))
         }
     }
+
+    if (picked.isNotEmpty()) AlertDialog(
+        onDismissRequest = { picked = emptyList() },
+        title = { Text("${picked.size} files selected") },
+        text = { Text("Are these separate bills, or supporting documents (payment screenshot, boarding pass…) for this bill?") },
+        confirmButton = { TextButton(onClick = { e?.let { c.jobs.startImport(it.tripId, picked) }; picked = emptyList(); nav.popBackStack() }) { Text("Separate bills") } },
+        dismissButton = { TextButton(onClick = { e?.let { c.jobs.startImport(it.tripId, picked, it.id) }; picked = emptyList() }) { Text("Documents for this bill") } },
+    )
 
     if (confirmDelete) AlertDialog(
         onDismissRequest = { confirmDelete = false },

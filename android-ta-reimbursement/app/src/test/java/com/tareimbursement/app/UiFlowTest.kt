@@ -141,7 +141,7 @@ class UiFlowTest {
         rule.onNodeWithText("Uber").performClick()
         waitText("Accounting head *")
         rule.onNodeWithText("Nature of expense: Cab / auto / metro ride").assertExists()
-        rule.onNodeWithText("Cab - Uber").assertExists() // mandatory remarks pre-filled
+        rule.onNodeWithText("Uber").assertExists() // mandatory remarks pre-filled (no ride details in this bill's text)
         rule.onNodeWithText("Confirm").performClick()
         rule.onNodeWithText("Choose how this expense should be classified.").assertExists()
         rule.onNodeWithText("Local Conveyance  (suggested)").performScrollTo().performClick()
@@ -150,8 +150,8 @@ class UiFlowTest {
         val e = runBlocking { c.repo.expenses.get(expenseId)!! }
         assertTrue(e.confirmed)
         assertEquals(ExpenseCategory.LOCAL_CONVEYANCE, e.categoryEnum)
-        assertEquals("Car - Taxi", e.modeOfTravel)
-        assertEquals("Cab - Uber", e.description)
+        assertEquals("Cab", e.modeOfTravel)
+        assertEquals("Uber", e.description)
 
         // Generate outputs and archive.
         rule.onNodeWithText("Generate TA statement").performClick()

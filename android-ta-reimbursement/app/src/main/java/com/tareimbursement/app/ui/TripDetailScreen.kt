@@ -166,6 +166,11 @@ fun TripDetailScreen(tripId: Long, nav: NavHostController) {
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (uris.isNotEmpty()) { lastCapturedFlow = false; c.jobs.startImport(tripId, uris) }
     }
+    // Android's photo picker has tick boxes, so many bill photos/screenshots can be picked at once.
+    val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(100)) { uris ->
+        if (uris.isNotEmpty()) { lastCapturedFlow = false; c.jobs.startImport(tripId, uris) }
+    }
+    var uploadMenu by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -231,8 +236,16 @@ fun TripDetailScreen(tripId: Long, nav: NavHostController) {
                     FilledTonalButton(onClick = camera, modifier = Modifier.weight(1f).height(52.dp), enabled = importState !is JobState.Running) {
                         Icon(Icons.Outlined.CameraAlt, null); Spacer(Modifier.width(8.dp)); Text("Scan bill")
                     }
-                    FilledTonalButton(onClick = { safeLaunch(ctx) { picker.launch(arrayOf("*/*")) } }, modifier = Modifier.weight(1f).height(52.dp), enabled = importState !is JobState.Running) {
-                        Icon(Icons.Outlined.UploadFile, null); Spacer(Modifier.width(8.dp)); Text("Upload files")
+                    Box(Modifier.weight(1f)) {
+                        FilledTonalButton(onClick = { uploadMenu = true }, modifier = Modifier.fillMaxWidth().height(52.dp), enabled = importState !is JobState.Running) {
+                            Icon(Icons.Outlined.UploadFile, null); Spacer(Modifier.width(8.dp)); Text("Upload files")
+                        }
+                        DropdownMenu(uploadMenu, { uploadMenu = false }) {
+                            DropdownMenuItem(text = { Column { Text("Photos & screenshots"); Text("Tick as many as you like", style = MaterialTheme.typography.labelSmall) } },
+                                onClick = { uploadMenu = false; safeLaunch(ctx) { photoPicker.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) } })
+                            DropdownMenuItem(text = { Column { Text("Files, PDFs or ZIP"); Text("Long-press a file to select several", style = MaterialTheme.typography.labelSmall) } },
+                                onClick = { uploadMenu = false; safeLaunch(ctx) { picker.launch(arrayOf("*/*")) } })
+                        }
                     }
                 }
                 Text("Photos, PDFs, screenshots, documents or ZIP — select many at once.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp, start = 4.dp))

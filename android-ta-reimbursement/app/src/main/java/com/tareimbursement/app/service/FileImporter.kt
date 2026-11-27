@@ -115,6 +115,7 @@ class FileImporter(
         var duplicates = 0
         val attDir = repo.attachmentDir(tripId)
         expanded.forEachIndexed { i, s ->
+            try {
             onProgress(ImportProgress(i, expanded.size, "Reading ${s.name}"))
             val type = FileSniffer.sniff(s.file, s.name)
             if (type == SniffedType.AUDIO) { skipped += "${s.name} (audio files are not supported)"; return@forEachIndexed }
@@ -173,6 +174,10 @@ class FileImporter(
             applyTrust(expenseId, meta, text, isCamera = s.name.startsWith(CAMERA_PREFIX))
             if (repo.refreshDuplicates(expenseId).isNotBlank() || (repo.expenses.get(expenseId)?.duplicateOfId ?: 0) > 0) duplicates++
             created += expenseId
+            } catch (e: Throwable) {
+                // One unreadable / too-large file never stops the other files in the same upload.
+                skipped += "${s.name} (could not be read${if (e is OutOfMemoryError) ": image too large" else ""})"
+            }
         }
         onProgress(ImportProgress(expanded.size, expanded.size, "Done"))
         val n = created.size + attached

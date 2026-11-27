@@ -75,7 +75,7 @@ class AiRunner(
                     val ai = BillAi.parse(answer)?.let { BillAi.validate(it, e0.ocrText, ctx, LocalDate.now()) }
                     // Re-read: the person may have edited the bill while the model was thinking.
                     val cur = repo.expenses.get(e0.id) ?: return@forEachIndexed
-                    repo.expenses.update(repo.touch(apply(cur, ai)))
+                    repo.expenses.update(repo.touch(apply(cur, ai, trip.location)))
                     repo.refreshDuplicates(cur.id)
                     done++
                 } catch (t: Throwable) {
@@ -107,7 +107,7 @@ class AiRunner(
          * Merges the model's reading into a draft bill. Values the person typed are never replaced;
          * the result is still a suggestion they confirm.
          */
-        fun apply(e: ExpenseEntity, ai: BillAiResult?): ExpenseEntity {
+        fun apply(e: ExpenseEntity, ai: BillAiResult?, place: String = ""): ExpenseEntity {
             if (ai == null) return e.copy(aiState = "FAILED", aiNote = "AI gave no usable answer - OCR reading kept.")
             if (e.userEdited || e.confirmed) {
                 val differs = (ai.amount != null && ai.amount != (if (e.isForeign) e.foreignAmount else e.amount)) || (ai.date != null && ai.date != e.date)
@@ -123,10 +123,16 @@ class AiRunner(
             )
             val f = BillAi.fuse(rules, ai, if (e.dateFromMetadata) e.date else null) ?: return e.copy(aiState = "DONE")
             val newCat = f.suggestion.category
-            val defaultOld = TravelMode.defaultRemark(oldCat, e.nature, e.vendor)
-            val remarksUntouched = e.description.isBlank() || e.description == defaultOld
+            val defaultOld = com.tareimbursement.app.core.RemarkWriter.write(oldCat, e.ocrText, e.vendor, place, e.nature)
+            val remarksUntouched = e.description.isBlank() || e.description == defaultOld || e.description == TravelMode.defaultRemark(oldCat, e.nature, e.vendor)
             val vendor = e.vendor.ifBlank { f.vendor.orEmpty() }
-            val description = if (remarksUntouched) (f.aiRemarks ?: TravelMode.defaultRemark(newCat, f.suggestion.nature, vendor)) else e.description
+            // House-style remark from the bill text; the AI's own words only when the text gives too little.
+            var house = com.tareimbursement.app.core.RemarkWriter.write(newCat, e.ocrText, vendor, place, f.suggestion.nature)
+            val aiMeal = f.aiRemarks?.let { Regex("(?i)\\b(breakfast|lunch|dinner|snacks)\\b").find(it)?.value?.lowercase()?.replaceFirstChar { c -> c.uppercase() } }
+            if (aiMeal != null && house.startsWith("Meal")) house = aiMeal + house.removePrefix("Meal")
+            val thin = house.split(' ').size <= 3
+            val description = if (remarksUntouched) (if (thin && f.aiRemarks != null) f.aiRemarks else house) else e.description
+            val headUntouched = e.category == null || e.category == e.suggestedCategory
             val amount = f.amount
             val (inr, foreign) = if (e.isForeign) (amount?.let { a -> e.exchangeRate?.let { Currencies.toInr(a, it) } } to amount) else (amount to e.foreignAmount)
             val dateFromMeta = e.dateFromMetadata && f.date == e.date && (ai.date == null || ai.date != e.date)
@@ -142,7 +148,8 @@ class AiRunner(
                 suggestedCategory = newCat.name, suggestionReason = f.suggestion.reason,
                 suggestionAlternatives = f.suggestion.alternatives.joinToString(",") { it.name }, nature = f.suggestion.nature,
                 description = description,
-                modeOfTravel = if (newCat != oldCat || e.modeOfTravel.isBlank()) TravelMode.suggest(newCat, e.ocrText, vendor) else e.modeOfTravel,
+                category = if (headUntouched) newCat.name else e.category,
+                modeOfTravel = if (newCat != oldCat || e.modeOfTravel.isBlank()) com.tareimbursement.app.core.RemarkWriter.mode(newCat, e.ocrText, vendor) else e.modeOfTravel,
                 aiState = "DONE", aiNote = notes.joinToString(" "),
             )
         }

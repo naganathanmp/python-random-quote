@@ -7,9 +7,24 @@ Bills are read on the phone (text recognition + an optional open-source AI model
 phone). Internet is used only to download that AI model once and, if you turn it on, to share a
 project with your team through your firm's own server.
 
-**Install:** copy `release/TA-Reimburse-v2.0.2.apk` to your phone, open it and allow
+**Install:** copy `release/TA-Reimburse-v2.0.3.apk` to your phone, open it and allow
 "Install unknown apps" for your file manager / browser when Android asks. Android 10 or newer.
-v2.0.2 installs over any earlier version and keeps existing claims (database upgraded automatically).
+v2.0.3 installs over any earlier version and keeps existing claims (database upgraded automatically).
+
+## What's new in 2.0.3
+
+- **Remarks written the way your past annexures are** (learned from 710 remarks in earlier TA
+  statements): "Rapido Bike from 148 Halasuru to Bommasandra", "Uber Go from A to B (toll incl.)",
+  "Dinner - Hotel Mangalam ( Hosur )", "Lunch at Shrinidhi Upchar, Bommasandra",
+  "NHAI Electronic City Toll (two-wheeler) - Bangalore", and exceptions explained, e.g. "Lunch - food
+  bill not provided, hence attached payment receipt (PhonePe UPI)". The meal comes from the time on
+  the bill; the place from the claim. Changing the head rewrites the remark in that head's style
+  (unless you wrote your own). Mode of travel is short: Cab / Auto / Bike / Metro / Food / NA.
+- **Accounting head filled in automatically** from the suggestion (you still confirm each bill).
+- **Upload many files at once**: "Upload files" → *Photos & screenshots* opens the photo picker with
+  tick boxes; *Files, PDFs or ZIP* opens the file picker (long-press to select several). One file
+  that can't be read no longer stops the rest. Picking several files on a bill asks whether they are
+  separate bills or documents for that bill.
 
 ## What's new in 2.0.2
 

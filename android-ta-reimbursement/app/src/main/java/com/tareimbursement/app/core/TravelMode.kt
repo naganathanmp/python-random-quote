@@ -5,8 +5,8 @@ import java.util.Locale
 /** "Mode of travel-Mandatory" values used in the firm's TA annexure, with suggestions. */
 object TravelMode {
     val options = listOf(
-        "Car - Taxi", "Car - Own", "Auto", "Bike Taxi", "Bus", "Train", "Metro", "Flight",
-        "Food", "Hotel Stay", "Laundry", "Car - Hired", "Parking", "Telephone", "Others",
+        "Cab", "Auto", "Bike", "Rapido", "Metro", "Car - Own", "Car - Taxi", "Bike Taxi", "Bus", "Train", "Flight",
+        "Food", "NA", "Hotel Stay", "Laundry", "Car - Hired", "Parking", "Telephone", "Others",
     )
 
     fun suggest(category: ExpenseCategory?, text: String, vendor: String = ""): String {
