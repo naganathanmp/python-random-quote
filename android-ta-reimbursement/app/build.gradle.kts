@@ -20,8 +20,8 @@ android {
         applicationId = "com.tareimbursement.app"
         minSdk = 29
         targetSdk = 35
-        versionCode = 6
-        versionName = "2.0.1"
+        versionCode = 7
+        versionName = "2.0.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // Real phones only (ARM); keeps the ML Kit OCR native library small.
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }

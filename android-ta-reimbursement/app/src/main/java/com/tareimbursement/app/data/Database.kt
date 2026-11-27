@@ -53,6 +53,9 @@ interface ExpenseDao {
     /** Includes soft-deleted rows (sync). */
     @Query("SELECT * FROM expenses WHERE tripId = :tripId AND dirty = 1") suspend fun dirtyForTrip(tripId: Long): List<ExpenseEntity>
     @Query("SELECT * FROM expenses WHERE aiState = 'QUEUED' AND deleted = 0 ORDER BY createdAt") suspend fun aiQueue(): List<ExpenseEntity>
+    /** Bills whose AI reading failed because the model couldn't start (incl. the v2.0.1 release bug) go back in the queue. */
+    @Query("UPDATE expenses SET aiState = 'QUEUED', aiNote = '' WHERE aiState = 'FAILED' AND deleted = 0 AND (aiNote LIKE 'The AI model could not be loaded%' OR aiNote LIKE 'AI helper couldn''t start.%')")
+    suspend fun requeueAiLoadFailures(): Int
     /** Clears the upload flag unless the bill changed again meanwhile. */
     @Query("UPDATE expenses SET dirty = 0 WHERE id = :id AND updatedAt = :ts") suspend fun clearDirty(id: Long, ts: Long)
     @Query("UPDATE expenses SET duplicateOfId = NULL WHERE duplicateOfId = :id") suspend fun clearDuplicateRefs(id: Long)

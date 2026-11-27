@@ -54,7 +54,10 @@ class AiRunner(
             return 0
         }
         val engine = try { engineFactory(model, models.fileFor(model)) } catch (t: Throwable) {
-            val msg = t.message ?: "AI model could not be loaded"
+            // Technical details go to the error report (Settings); the bill shows a plain note.
+            try { com.tareimbursement.app.service.CrashLog.record(context, com.tareimbursement.app.BuildConfig.VERSION_NAME, "ai-load", t) } catch (_: Throwable) { }
+            val msg = if (t.message?.contains("64-bit ARM") == true) "This phone's processor can't run the AI helper - text-scan reading kept."
+                else "$LOAD_FAILED Text-scan reading kept; it will retry automatically."
             queue.forEach { e -> repo.expenses.update(e.copy(aiState = "FAILED", aiNote = msg)) }
             _status.value = null
             return 0
@@ -76,7 +79,8 @@ class AiRunner(
                     repo.refreshDuplicates(cur.id)
                     done++
                 } catch (t: Throwable) {
-                    repo.expenses.get(e0.id)?.let { repo.expenses.update(it.copy(aiState = "FAILED", aiNote = "AI could not read this bill (${t.javaClass.simpleName}).")) }
+                    try { com.tareimbursement.app.service.CrashLog.record(context, com.tareimbursement.app.BuildConfig.VERSION_NAME, "ai-read", t) } catch (_: Throwable) { }
+                    repo.expenses.get(e0.id)?.let { repo.expenses.update(it.copy(aiState = "FAILED", aiNote = "AI helper couldn't read this bill - text-scan reading kept.")) }
                 }
             }
         } finally {
@@ -97,6 +101,8 @@ class AiRunner(
     }
 
     companion object {
+        const val LOAD_FAILED = "AI helper couldn't start."
+
         /**
          * Merges the model's reading into a draft bill. Values the person typed are never replaced;
          * the result is still a suggestion they confirm.

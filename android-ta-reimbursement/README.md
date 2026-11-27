@@ -7,9 +7,19 @@ Bills are read on the phone (text recognition + an optional open-source AI model
 phone). Internet is used only to download that AI model once and, if you turn it on, to share a
 project with your team through your firm's own server.
 
-**Install:** copy `release/TA-Reimburse-v2.0.1.apk` to your phone, open it and allow
+**Install:** copy `release/TA-Reimburse-v2.0.2.apk` to your phone, open it and allow
 "Install unknown apps" for your file manager / browser when Android asks. Android 10 or newer.
-v2.0.1 installs over any earlier version and keeps existing claims (database upgraded automatically).
+v2.0.2 installs over any earlier version and keeps existing claims (database upgraded automatically).
+
+## What's new in 2.0.2
+
+- **Fixed: "The AI model could not be loaded"** in the 2.0.0/2.0.1 release builds. The release
+  shrinker (R8) had removed MediaPipe settings fields that are looked up by name at run time; it had
+  also removed the signature algorithms, so 2.0.x release outputs were silently left unsigned. Both
+  are now kept, and `tools/check-release.sh` checks every release APK for them.
+- Bills where the AI couldn't start are retried automatically after updating; the bill shows a plain
+  message instead of technical text (details go to Settings → Error report).
+- Sign in to Team sharing from the e-mail link (tap it, or paste it in Settings → Team sharing).
 
 ## What's new in 2.0.0
 
@@ -173,6 +183,7 @@ cd android-ta-reimbursement
 ./gradlew :app:testDebugUnitTest   # 81 JVM + Robolectric tests (parser, AI prompt/validation eval, trust check, duplicates, signatures verified with pdfsig/openssl, two-phone team sync, Excel template, PDF, split, currency, travellers, OCR, budget, migrations 1→4, security, rotation/crash resilience, workflows, UI)
 ./gradlew :app:lintRelease
 ./gradlew :app:assembleRelease     # needs keystore.properties (not committed) or falls back to debug signing
+tools/check-release.sh app/build/outputs/apk/release/app-release.apk   # must print RELEASE CHECK PASSED
 ```
 
 Project layout: `core/` (pure Kotlin: receipt parser, `ai/` prompt + validation, `trust/` metadata &

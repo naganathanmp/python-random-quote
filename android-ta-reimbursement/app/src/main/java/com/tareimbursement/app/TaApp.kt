@@ -83,8 +83,11 @@ class TaApp : Application() {
         super.onCreate()
         com.tareimbursement.app.service.CrashLog.install(this, BuildConfig.VERSION_NAME)
         if (!::container.isInitialized) container = AppContainer(this, AppDatabase.build(this))
-        // Finish any AI reading that was interrupted (app closed while bills were queued).
-        container.ai.kick()
+        // Finish any AI reading that was interrupted, and retry bills where the AI couldn't start.
+        container.appScope.launch {
+            try { if (container.models.installed() != null) container.repo.expenses.requeueAiLoadFailures() } catch (_: Exception) { }
+            container.ai.runQueue()
+        }
         if (container.supabase.signedIn) {
             com.tareimbursement.app.service.sync.SyncWorker.schedule(this)
             container.appScope.launch { try { container.sync.syncAll() } catch (_: Exception) { } }

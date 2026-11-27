@@ -107,6 +107,21 @@ class V2FeaturesTest {
         assertEquals("FAILED", AiRunner.apply(base, null).aiState)
     }
 
+    @Test fun billsWhereTheAiCouldNotStartAreRetried() = runBlocking {
+        val t = trip("Retry")
+        val old = repo.addManualExpense(t, null)
+        repo.expenses.update(repo.expenses.get(old)!!.copy(aiState = "FAILED", aiNote = "The AI model could not be loaded: Field modelPath_ for com.google.mediapipe... not found"))
+        val now = repo.addManualExpense(t, null)
+        repo.expenses.update(repo.expenses.get(now)!!.copy(aiState = "FAILED", aiNote = AiRunner.LOAD_FAILED + " Text-scan reading kept; it will retry automatically."))
+        val other = repo.addManualExpense(t, null)
+        repo.expenses.update(repo.expenses.get(other)!!.copy(aiState = "FAILED", aiNote = "AI gave no usable answer - OCR reading kept."))
+        assertEquals(2, repo.expenses.requeueAiLoadFailures())
+        assertEquals("QUEUED", repo.expenses.get(old)!!.aiState)
+        assertEquals("", repo.expenses.get(old)!!.aiNote)
+        assertEquals("QUEUED", repo.expenses.get(now)!!.aiState)
+        assertEquals("FAILED", repo.expenses.get(other)!!.aiState)
+    }
+
     @Test fun outputsAreSignedWithDeclaration() = runBlocking {
         val kp = KeyPairGenerator.getInstance("EC").apply { initialize(ECGenParameterSpec("secp256r1")) }.generateKeyPair()
         val signer = object : DocSigner {
