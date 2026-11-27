@@ -7,9 +7,16 @@ Bills are read on the phone (text recognition + an optional open-source AI model
 phone). Internet is used only to download that AI model once and, if you turn it on, to share a
 project with your team through your firm's own server.
 
-**Install:** copy `release/TA-Reimburse-v2.0.3.apk` to your phone, open it and allow
+**Install:** copy `release/TA-Reimburse-v2.0.4.apk` to your phone, open it and allow
 "Install unknown apps" for your file manager / browser when Android asks. Android 10 or newer.
-v2.0.3 installs over any earlier version and keeps existing claims (database upgraded automatically).
+v2.0.4 installs over any earlier version and keeps existing claims (database upgraded automatically).
+
+## What's new in 2.0.4
+
+- Fixed: deleting a bill on a team (shared) claim froze the screen. The screen now goes back as
+  soon as you confirm, and the delete finishes in the background.
+- Faster feel: screen changes are a 90 ms fade instead of Android's default 700 ms animation; the
+  team-sync check on a claim runs only when you are signed in to Team sharing.
 
 ## What's new in 2.0.3
 

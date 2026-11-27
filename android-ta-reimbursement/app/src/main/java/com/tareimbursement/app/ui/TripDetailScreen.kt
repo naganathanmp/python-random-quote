@@ -157,7 +157,7 @@ fun TripDetailScreen(tripId: Long, nav: NavHostController) {
     }
     // Team claims stay fresh while open.
     LaunchedEffect(t?.shared) {
-        while (t?.shared == true) { try { c.sync.syncTrip(tripId) } catch (_: Exception) { }; kotlinx.coroutines.delay(30_000) }
+        while (t?.shared == true && c.supabase.signedIn) { try { c.sync.syncTrip(tripId) } catch (_: Exception) { }; kotlinx.coroutines.delay(30_000) }
     }
     LaunchedEffect(t?.status) { if (t != null && t.isArchived) { nav.navigate(Routes.claim(tripId)) { popUpTo(Routes.trip(tripId)) { inclusive = true } } } }
 

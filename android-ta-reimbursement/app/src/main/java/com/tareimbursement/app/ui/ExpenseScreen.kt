@@ -187,7 +187,8 @@ fun ExpenseScreen(expenseId: Long, nav: NavHostController) {
     }
     // If the expense was deleted / merged, leave the screen.
     var seen by remember { mutableStateOf(false) }
-    LaunchedEffect(e) { if (e != null) seen = true else if (seen) nav.popBackStack() }
+    // A bill deleted here or on a team member's phone (kept as a hidden "deleted" row) closes this screen.
+    LaunchedEffect(e?.id, e?.deleted) { if (e != null && !e.deleted) seen = true else if (seen) nav.popBackStack() }
 
     val supportCamera = rememberCamera { uri -> e?.let { c.jobs.startImport(it.tripId, listOf(uri), it.id) } }
     // Several files picked here: ask whether they are separate bills or documents for this bill.
@@ -484,7 +485,12 @@ fun ExpenseScreen(expenseId: Long, nav: NavHostController) {
         onDismissRequest = { confirmDelete = false },
         title = { Text("Delete this expense?") },
         text = { Text("The expense and its ${atts.size} file(s) will be removed.") },
-        confirmButton = { TextButton(onClick = { confirmDelete = false; scope.launch(kotlinx.coroutines.Dispatchers.Main.immediate) { c.repo.deleteExpense(expenseId) } }) { Text("Delete", color = MaterialTheme.colorScheme.error) } },
+        confirmButton = { TextButton(onClick = {
+            confirmDelete = false
+            seen = false                       // we navigate ourselves; don't pop twice
+            nav.popBackStack()                 // go back at once…
+            c.appScope.launch { c.repo.deleteExpense(expenseId) }   // …and delete in the background
+        }) { Text("Delete", color = MaterialTheme.colorScheme.error) } },
         dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } },
     )
     if (mergeOpen) PickExpenseDialog("Merge into…", "This bill's files become supporting documents of the expense you choose, and this entry is removed.", others, { mergeOpen = false }) { target ->

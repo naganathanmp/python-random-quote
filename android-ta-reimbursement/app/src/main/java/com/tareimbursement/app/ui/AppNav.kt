@@ -64,7 +64,15 @@ fun AppNav(nav: NavHostController = rememberNavController()) {
     val profile by c.prefs.profile.collectAsState()
     val start = if (profile.isComplete) Routes.HOME else Routes.ONBOARDING
     val idArg = listOf(navArgument("id") { type = NavType.LongType })
-    NavHost(nav, start) {
+    // Fast, subtle screen changes: a 90 ms cross-fade instead of the default 700 ms.
+    val fast = androidx.compose.animation.core.tween<Float>(90)
+    NavHost(
+        nav, start,
+        enterTransition = { androidx.compose.animation.fadeIn(fast) },
+        exitTransition = { androidx.compose.animation.fadeOut(fast) },
+        popEnterTransition = { androidx.compose.animation.fadeIn(fast) },
+        popExitTransition = { androidx.compose.animation.fadeOut(fast) },
+    ) {
         composable(Routes.ONBOARDING) {
             ProfileScreen(onboarding = true, onBack = {}, onDone = { nav.navigate(Routes.HOME) { popUpTo(Routes.ONBOARDING) { inclusive = true } } })
         }

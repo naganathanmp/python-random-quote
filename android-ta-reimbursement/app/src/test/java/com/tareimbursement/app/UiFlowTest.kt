@@ -198,4 +198,61 @@ class UiFlowTest {
         waitText("Per-bill limits — leave blank for no limit.")
         rule.onNodeWithText("Cancel").performClick()
     }
+
+    /** Deleting a bill returns to the claim straight away (v2.0.3 feedback: the screen froze). */
+    @Test fun deletingAnExpenseGoesBack() {
+        val c = app.container
+        c.prefs.saveProfile(Profile(name = "Ravi Kumar", employeeCode = "E1023"))
+        val tripId = runBlocking {
+            val t = c.repo.createTrip(TripEntity(title = "Delete Audit", clientName = "Acme", projectCode = "D1", location = "Pune", purpose = "Audit",
+                startEpochDay = LocalDate.of(2026, 3, 24).toEpochDay(), endEpochDay = LocalDate.of(2026, 3, 28).toEpochDay()))
+            val e = c.repo.expenses.insert(ExpenseEntity(tripId = t, dateEpochDay = LocalDate.of(2026, 3, 25).toEpochDay(), amount = 300.0, vendor = "Zzz Cafe"))
+            val f = File(c.repo.attachmentDir(t), "z.jpg").apply { writeBytes(jpeg) }
+            c.repo.attachments.insert(AttachmentEntity(expenseId = e, tripId = t, storedPath = f.relativeTo(app.filesDir).path, originalName = "z.jpg", mimeType = "image/jpeg", kind = "IMAGE", isPrimary = true, sizeBytes = f.length()))
+            c.repo.expenses.insert(ExpenseEntity(tripId = t, dateEpochDay = LocalDate.of(2026, 3, 26).toEpochDay(), amount = 120.0, vendor = "Keep Me"))
+            t
+        }
+        start()
+        waitText("Delete Audit")
+        rule.onNodeWithText("Delete Audit").performClick()
+        waitText("Zzz Cafe")
+        rule.onNodeWithText("Zzz Cafe").performClick()
+        waitText("Bill & supporting documents")
+        rule.onNodeWithContentDescription("Delete expense").performClick()
+        rule.onNodeWithText("Delete").performClick()
+        // Back on the claim, the bill is gone and the other one is still there.
+        waitText("Expenses (1)", 5_000)
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Zzz Cafe").fetchSemanticsNodes().isEmpty() }
+        rule.onNodeWithText("Scan bill").assertExists()
+        assertEquals(1, runBlocking { c.repo.expenses.forTrip(tripId).size })
+    }
+    /** Same on a team (shared) claim, where the deleted bill is kept as a hidden tombstone. */
+    @Test fun deletingAnExpenseGoesBackOnSharedClaim() {
+        val c = app.container
+        c.prefs.saveProfile(Profile(name = "Ravi Kumar", employeeCode = "E1023"))
+        val tripId = runBlocking {
+            val t = c.repo.createTrip(TripEntity(title = "Delete Audit", clientName = "Acme", projectCode = "D1", location = "Pune", purpose = "Audit",
+                startEpochDay = LocalDate.of(2026, 3, 24).toEpochDay(), endEpochDay = LocalDate.of(2026, 3, 28).toEpochDay()))
+            val e = c.repo.expenses.insert(ExpenseEntity(tripId = t, dateEpochDay = LocalDate.of(2026, 3, 25).toEpochDay(), amount = 300.0, vendor = "Zzz Cafe"))
+            val f = File(c.repo.attachmentDir(t), "z.jpg").apply { writeBytes(jpeg) }
+            c.repo.attachments.insert(AttachmentEntity(expenseId = e, tripId = t, storedPath = f.relativeTo(app.filesDir).path, originalName = "z.jpg", mimeType = "image/jpeg", kind = "IMAGE", isPrimary = true, sizeBytes = f.length()))
+            c.repo.expenses.insert(ExpenseEntity(tripId = t, dateEpochDay = LocalDate.of(2026, 3, 26).toEpochDay(), amount = 120.0, vendor = "Keep Me"))
+            c.repo.trips.update(c.repo.trips.get(t)!!.copy(shared = true, myRole = "OWNER"))
+            t
+        }
+        start()
+        waitText("Delete Audit")
+        rule.onNodeWithText("Delete Audit").performClick()
+        waitText("Expenses (2)")
+        rule.onNode(androidx.compose.ui.test.hasScrollToIndexAction()).performScrollToNode(hasText("Zzz Cafe"))
+        rule.onNodeWithText("Zzz Cafe").performClick()
+        waitText("Bill & supporting documents")
+        rule.onNodeWithContentDescription("Delete expense").performClick()
+        rule.onNodeWithText("Delete").performClick()
+        // Back on the claim, the bill is gone and the other one is still there.
+        waitText("Expenses (1)", 5_000)
+        rule.waitUntil(5_000) { rule.onAllNodesWithText("Zzz Cafe").fetchSemanticsNodes().isEmpty() }
+        rule.onNodeWithText("Scan bill").assertExists()
+        assertEquals(1, runBlocking { c.repo.expenses.forTrip(tripId).size })
+    }
 }
