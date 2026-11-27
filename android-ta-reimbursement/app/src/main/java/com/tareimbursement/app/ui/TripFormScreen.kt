@@ -63,7 +63,10 @@ fun TripFormScreen(tripId: Long?, nav: NavHostController) {
     var start by rememberSaveable { mutableStateOf<Long?>(LocalDate.now().toEpochDay()) }
     var end by rememberSaveable { mutableStateOf<Long?>(LocalDate.now().toEpochDay()) }
     var advance by rememberSaveable { mutableStateOf("") }
-    var currency by rememberSaveable { mutableStateOf("INR") }
+    // New claims start in the default currency chosen in Settings.
+    val uiPrefs by androidx.compose.ui.platform.LocalContext.current.container.prefs.ui.collectAsState()
+    val defaultCurrency = uiPrefs.defaultCurrency
+    var currency by rememberSaveable { mutableStateOf(defaultCurrency) }
     var coTravellers by rememberSaveable(stateSaver = EditRowsSaver) { mutableStateOf(listOf<EditRow>()) }
     var splitOn by rememberSaveable { mutableStateOf(false) }
     var splitAuto by rememberSaveable { mutableStateOf(true) }

@@ -113,14 +113,14 @@ class CrashResilienceTest {
             rule.waitForIdle()
             recreate()
         }
-        waitText("On-device AI")
+        waitText("Appearance")
         rule.onNode(androidx.compose.ui.test.hasScrollToIndexAction()).performScrollToNode(hasText("Verify a document"))
         rule.onNodeWithText("Verify a document").performClick()
         waitText("Choose file(s)")
         recreate()
         waitText("Choose file(s)")
         rule.onNodeWithContentDescription("Back").performClick()
-        waitText("On-device AI")
+        waitText("Verify a document")
         val trips = runBlocking { rule.activity.container.repo.trips.all() }
         assertEquals(1, trips.size)
         assertEquals(1000.0, trips[0].budget!!, 0.0)

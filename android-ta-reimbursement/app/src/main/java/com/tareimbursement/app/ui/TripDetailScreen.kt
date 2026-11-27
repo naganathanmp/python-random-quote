@@ -112,13 +112,13 @@ fun categoryIcon(c: ExpenseCategory?): ImageVector = when (c) {
 
 /** Camera capture helper shared by the claim and expense screens. */
 @Composable
-fun rememberCamera(onCaptured: (Uri) -> Unit): () -> Unit {
+fun rememberCamera(onCancel: () -> Unit = {}, onCaptured: (Uri) -> Unit): () -> Unit {
     val ctx = LocalContext.current
     var pending by rememberSaveable { mutableStateOf<String?>(null) }
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
         val path = pending; pending = null
         if (ok && path != null && File(path).length() > 0) onCaptured(Uri.fromFile(File(path)))
-        else path?.let { File(it).delete() }
+        else { path?.let { File(it).delete() }; onCancel() }
     }
     return remember {
         {
@@ -162,7 +162,16 @@ fun TripDetailScreen(tripId: Long, nav: NavHostController) {
     LaunchedEffect(t?.status) { if (t != null && t.isArchived) { nav.navigate(Routes.claim(tripId)) { popUpTo(Routes.trip(tripId)) { inclusive = true } } } }
 
     val supportCamera = rememberCamera { uri -> supportFor?.let { c.jobs.startImport(tripId, listOf(uri), it) } }
-    val camera = rememberCamera { uri -> lastCapturedFlow = true; c.jobs.startImport(tripId, listOf(uri)) }
+    val ui by c.prefs.ui.collectAsState()
+    // Batch scanning: photos are collected while the camera keeps reopening; Back in the camera imports them all.
+    var batch by rememberSaveable { mutableStateOf(listOf<String>()) }
+    var reopen by remember { mutableStateOf(0) }
+    val single = rememberCamera { uri -> lastCapturedFlow = true; c.jobs.startImport(tripId, listOf(uri)) }
+    val batchCam = rememberCamera(onCancel = {
+        if (batch.isNotEmpty()) { lastCapturedFlow = false; c.jobs.startImport(tripId, batch.map { Uri.parse(it) }); batch = emptyList() }
+    }) { uri -> batch = batch + uri.toString(); reopen++ }
+    LaunchedEffect(reopen) { if (reopen > 0) batchCam() }
+    val camera: () -> Unit = { if (ui.batchScan) batchCam() else single() }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (uris.isNotEmpty()) { lastCapturedFlow = false; c.jobs.startImport(tripId, uris) }
     }
@@ -173,6 +182,13 @@ fun TripDetailScreen(tripId: Long, nav: NavHostController) {
     var uploadMenu by remember { mutableStateOf(false) }
 
     Scaffold(
+        floatingActionButton = {
+            if (t != null && !t.isArchived) androidx.compose.material3.ExtendedFloatingActionButton(
+                onClick = camera, icon = { Icon(Icons.Outlined.CameraAlt, null) },
+                text = { Text(if (batch.isNotEmpty()) "Scan (${batch.size})" else "Scan") },
+                containerColor = MaterialTheme.colorScheme.primaryContainer, contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+            )
+        },
         topBar = {
             TopAppBar(
                 title = { Text(t?.title ?: "", maxLines = 1, overflow = TextOverflow.Ellipsis) },

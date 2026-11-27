@@ -65,13 +65,15 @@ fun AppNav(nav: NavHostController = rememberNavController()) {
     val start = if (profile.isComplete) Routes.HOME else Routes.ONBOARDING
     val idArg = listOf(navArgument("id") { type = NavType.LongType })
     // Fast, subtle screen changes: a 90 ms cross-fade instead of the default 700 ms.
+    // With "Reduce motion" on, screens change instantly.
     val fast = androidx.compose.animation.core.tween<Float>(90)
+    val still = LocalReduceMotion.current
     NavHost(
         nav, start,
-        enterTransition = { androidx.compose.animation.fadeIn(fast) },
-        exitTransition = { androidx.compose.animation.fadeOut(fast) },
-        popEnterTransition = { androidx.compose.animation.fadeIn(fast) },
-        popExitTransition = { androidx.compose.animation.fadeOut(fast) },
+        enterTransition = { if (still) androidx.compose.animation.EnterTransition.None else androidx.compose.animation.fadeIn(fast) },
+        exitTransition = { if (still) androidx.compose.animation.ExitTransition.None else androidx.compose.animation.fadeOut(fast) },
+        popEnterTransition = { if (still) androidx.compose.animation.EnterTransition.None else androidx.compose.animation.fadeIn(fast) },
+        popExitTransition = { if (still) androidx.compose.animation.ExitTransition.None else androidx.compose.animation.fadeOut(fast) },
     ) {
         composable(Routes.ONBOARDING) {
             ProfileScreen(onboarding = true, onBack = {}, onDone = { nav.navigate(Routes.HOME) { popUpTo(Routes.ONBOARDING) { inclusive = true } } })

@@ -8,6 +8,8 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.swipeLeft
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
@@ -192,7 +194,7 @@ class UiFlowTest {
         waitText("Completed TA statements")
         waitText("Stat Audit")
         rule.onNodeWithText("Settings").performClick()
-        waitText("On-device AI")
+        waitText("Appearance")
         rule.onNode(androidx.compose.ui.test.hasScrollToIndexAction()).performScrollToNode(hasText("Per-bill limits & own-vehicle rate"))
         rule.onNodeWithText("Per-bill limits & own-vehicle rate").performClick()
         waitText("Per-bill limits — leave blank for no limit.")
@@ -254,5 +256,57 @@ class UiFlowTest {
         rule.waitUntil(5_000) { rule.onAllNodesWithText("Zzz Cafe").fetchSemanticsNodes().isEmpty() }
         rule.onNodeWithText("Scan bill").assertExists()
         assertEquals(1, runBlocking { c.repo.expenses.forTrip(tripId).size })
+    }
+
+    /** Settings → Appearance and Numbers change the app straight away and are remembered. */
+    @Test fun customisationSettings() {
+        val c = app.container
+        c.prefs.saveProfile(Profile(name = "Ravi Kumar", employeeCode = "E1023"))
+        val tripId = runBlocking {
+            val t = c.repo.createTrip(TripEntity(title = "Format Audit", clientName = "Acme", projectCode = "F1", location = "Hosur", purpose = "Audit",
+                startEpochDay = LocalDate.of(2026, 3, 24).toEpochDay(), endEpochDay = LocalDate.of(2026, 3, 28).toEpochDay()))
+            c.repo.expenses.insert(ExpenseEntity(tripId = t, dateEpochDay = LocalDate.of(2026, 3, 25).toEpochDay(), amount = 123456.5, vendor = "Big Hotel"))
+            t
+        }
+        start()
+        waitText("₹1,23,456.50")                                  // Indian grouping with paise by default
+        waitText("HOS")                                            // departure-board route code
+        rule.onNodeWithText("Settings").performClick()
+        waitText("Appearance")
+        rule.onNodeWithText("Dark").performClick()
+        assertEquals("DARK", c.prefs.ui.value.theme)
+        rule.onNode(androidx.compose.ui.test.hasScrollToIndexAction()).performScrollToNode(androidx.compose.ui.test.hasContentDescription("Teal"))
+        rule.onNodeWithContentDescription("Teal").performClick()
+        assertEquals("TEAL", c.prefs.ui.value.accent)
+        rule.onNode(androidx.compose.ui.test.hasScrollToIndexAction()).performScrollToNode(hasText("123,456"))
+        rule.onNodeWithText("123,456").performClick()
+        rule.onNode(androidx.compose.ui.test.hasScrollToIndexAction()).performScrollToNode(androidx.compose.ui.test.hasContentDescription("Show paise"))
+        rule.onNodeWithContentDescription("Show paise").performClick()
+        assertEquals(false, c.prefs.ui.value.indianGrouping)
+        assertEquals(false, c.prefs.ui.value.showPaise)
+        rule.onNode(androidx.compose.ui.test.hasScrollToIndexAction()).performScrollToNode(hasText("Batch scanning"))
+        c.prefs.updateUi { it.copy(theme = "SYSTEM", accent = "YELLOW", indianGrouping = true, showPaise = true) }
+        assertEquals("₹1,23,456.50", com.tareimbursement.app.core.AmountWords.inr(123456.5))
+    }
+
+    /** Swiping left on a bill opens the next bill of the claim. */
+    @Test fun swipeToNextBill() {
+        val c = app.container
+        c.prefs.saveProfile(Profile(name = "Ravi Kumar", employeeCode = "E1023"))
+        runBlocking {
+            val t = c.repo.createTrip(TripEntity(title = "Swipe Audit", clientName = "Acme", projectCode = "S1", location = "Pune", purpose = "Audit",
+                startEpochDay = LocalDate.of(2026, 3, 24).toEpochDay(), endEpochDay = LocalDate.of(2026, 3, 28).toEpochDay()))
+            c.repo.expenses.insert(ExpenseEntity(tripId = t, dateEpochDay = LocalDate.of(2026, 3, 25).toEpochDay(), amount = 100.0, vendor = "First Cafe"))
+            c.repo.expenses.insert(ExpenseEntity(tripId = t, dateEpochDay = LocalDate.of(2026, 3, 26).toEpochDay(), amount = 200.0, vendor = "Second Cab"))
+        }
+        start()
+        waitText("Swipe Audit")
+        rule.onNodeWithText("Swipe Audit").performClick()
+        waitText("Expenses (2)")
+        rule.onNode(androidx.compose.ui.test.hasScrollToIndexAction()).performScrollToNode(hasText("First Cafe"))
+        rule.onNodeWithText("First Cafe").performClick()
+        waitText("Bill 1 of 2")
+        rule.onNodeWithText("Bill & supporting documents").performTouchInput { swipeLeft() }
+        waitText("Bill 2 of 2")
     }
 }

@@ -88,6 +88,8 @@ class TaApp : Application() {
             try { if (container.models.installed() != null) container.repo.expenses.requeueAiLoadFailures() } catch (_: Exception) { }
             container.ai.runQueue()
         }
+        // Daily reminders and the weekly automatic backup.
+        try { com.tareimbursement.app.service.HousekeepingWorker.schedule(this) } catch (_: Exception) { }
         if (container.supabase.signedIn) {
             com.tareimbursement.app.service.sync.SyncWorker.schedule(this)
             container.appScope.launch { try { container.sync.syncAll() } catch (_: Exception) { } }

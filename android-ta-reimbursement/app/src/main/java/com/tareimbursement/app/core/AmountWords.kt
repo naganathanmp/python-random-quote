@@ -35,18 +35,27 @@ object AmountWords {
         return "Rupees ${words(r)}" + (if (p > 0) " and ${twoDigits(p)} Paise" else "") + " Only"
     }
 
-    /** "₹1,23,456.00" (Indian grouping, computed by hand so it is identical on every device/JVM). */
-    fun inr(amount: Double, symbol: String = "₹"): String {
+    /** App-wide number style (Settings → Number format). Defaults: Indian grouping with paise. */
+    @Volatile var indianGrouping: Boolean = true
+    @Volatile var showPaise: Boolean = true
+
+    /** "₹1,23,456.00" (Indian) or "₹123,456.00" (international); paise optional. Computed by hand so it is identical on every device. */
+    fun inr(amount: Double, symbol: String = "₹", indian: Boolean = indianGrouping, paiseShown: Boolean = showPaise): String {
         val neg = amount < 0
         val paise = Math.abs((amount * 100).roundToLong())
         val rupees = (paise / 100).toString(); val ps = (paise % 100).toString().padStart(2, '0')
-        val grouped = if (rupees.length <= 3) rupees else {
-            val last3 = rupees.takeLast(3); var rest = rupees.dropLast(3)
-            val sb = StringBuilder()
-            while (rest.length > 2) { sb.insert(0, "," + rest.takeLast(2)); rest = rest.dropLast(2) }
-            rest + sb.toString() + "," + last3
+        val whole = if (paiseShown) rupees else ((paise + 50) / 100).toString()
+        val grouped = when {
+            whole.length <= 3 -> whole
+            !indian -> whole.reversed().chunked(3).joinToString(",").reversed()
+            else -> {
+                val last3 = whole.takeLast(3); var rest = whole.dropLast(3)
+                val sb = StringBuilder()
+                while (rest.length > 2) { sb.insert(0, "," + rest.takeLast(2)); rest = rest.dropLast(2) }
+                rest + sb.toString() + "," + last3
+            }
         }
-        return (if (neg) "-" else "") + symbol + grouped + "." + ps
+        return (if (neg) "-" else "") + symbol + grouped + (if (paiseShown) ".$ps" else "")
     }
 
     /** Whole-rupee compact form for charts: ₹1.2L, ₹45K. */

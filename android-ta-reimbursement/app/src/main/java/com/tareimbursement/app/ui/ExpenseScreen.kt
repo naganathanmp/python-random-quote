@@ -1,5 +1,11 @@
 package com.tareimbursement.app.ui
 
+import androidx.compose.foundation.background
+
+import androidx.compose.ui.input.pointer.pointerInput
+
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
@@ -127,6 +133,7 @@ fun ExpenseScreen(expenseId: Long, nav: NavHostController) {
     var dupOf by remember { mutableStateOf<ExpenseEntity?>(null) }
     var readOnly by remember { mutableStateOf(false) }
     var tripShared by remember { mutableStateOf(false) }
+    var order by remember { mutableStateOf(listOf<Long>()) }
     var tripPlace by remember { mutableStateOf("") }
     /** Picking another head rewrites the remark in that head's style, unless the person wrote their own. */
     fun onHead(newCat: ExpenseCategory) {
@@ -174,7 +181,9 @@ fun ExpenseScreen(expenseId: Long, nav: NavHostController) {
     }
     LaunchedEffect(e?.duplicateOfId, e?.tripId, atts.size) {
         if (e == null) return@LaunchedEffect
-        others = c.repo.expenses.forTrip(e.tripId).filter { it.id != e.id }
+        val all = c.repo.expenses.forTrip(e.tripId)
+        order = all.map { it.id }
+        others = all.filter { it.id != e.id }
         dupOf = e.duplicateOfId?.takeIf { it > 0 }?.let { c.repo.expenses.get(it) }
         val trip = c.repo.trips.get(e.tripId)
         tripShared = trip?.shared == true
@@ -232,6 +241,16 @@ fun ExpenseScreen(expenseId: Long, nav: NavHostController) {
         mileageKm = if (isMileage) kmValue ?: 0.0 else null, mileageRate = if (isMileage) perKmValue else null, tollAmount = if (isMileage) tollValue ?: 0.0 else null,
     )
 
+    /** Saves this bill as it is and opens the next (+1) or previous (-1) bill of the claim. */
+    fun goTo(step: Int) {
+        val pos = order.indexOf(expenseId)
+        val target = order.getOrNull(pos + step) ?: return
+        scope.launch(kotlinx.coroutines.Dispatchers.Main.immediate) {
+            if (!readOnly && loaded) build(false)?.let { c.repo.saveExpense(it) }
+            nav.navigate(Routes.expense(target)) { popUpTo(Routes.expense(expenseId)) { inclusive = true } }
+        }
+    }
+
     androidx.activity.compose.BackHandler(enabled = loaded && !readOnly && e != null) {
         scope.launch(kotlinx.coroutines.Dispatchers.Main.immediate) { build(false)?.let { c.repo.saveExpense(it) }; nav.popBackStack() }
     }
@@ -239,7 +258,13 @@ fun ExpenseScreen(expenseId: Long, nav: NavHostController) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(if (readOnly) "Expense" else if (e?.confirmed == true) "Edit expense" else "Review bill") },
+                title = {
+                    Column {
+                        Text(if (readOnly) "Expense" else if (e?.confirmed == true) "Edit expense" else "Review bill")
+                        val pos = order.indexOf(expenseId)
+                        if (pos >= 0 && order.size > 1) Text("Bill ${pos + 1} of ${order.size} · swipe for next", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                },
                 navigationIcon = {
                     IconButton(onClick = {
                         if (!readOnly && loaded) scope.launch(kotlinx.coroutines.Dispatchers.Main.immediate) { build(false)?.let { c.repo.saveExpense(it) }; nav.popBackStack() } else nav.popBackStack()
@@ -285,7 +310,15 @@ fun ExpenseScreen(expenseId: Long, nav: NavHostController) {
     ) { pad ->
         if (e == null || !loaded) return@Scaffold
         Column(
-            Modifier.fillMaxSize().padding(pad).imePadding().verticalScroll(rememberScrollState()).padding(16.dp),
+            Modifier.fillMaxSize().padding(pad).imePadding()
+                // Swipe left / right to move to the next / previous bill (the current one is saved as a draft).
+                .pointerInput(order, loaded) {
+                    var dx = 0f
+                    detectHorizontalDragGestures(onDragStart = { dx = 0f }, onHorizontalDrag = { ch, d -> dx += d; ch.consume() }, onDragEnd = {
+                        if (kotlin.math.abs(dx) > 140f) goTo(if (dx < 0) 1 else -1)
+                    })
+                }
+                .verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             // --------------- documents
@@ -325,6 +358,8 @@ fun ExpenseScreen(expenseId: Long, nav: NavHostController) {
                     }
                 }
             }
+
+            FoundOnBill(e.ocrText, e.amount, e.foreignAmount, e.date)
 
             // --------------- details
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -588,6 +623,40 @@ private fun ModeOfTravelField(value: String, onChange: (String) -> Unit, isError
             modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryEditable))
         ExposedDropdownMenu(open, { open = false }) {
             TravelMode.options.forEach { m -> DropdownMenuItem(text = { Text(m) }, onClick = { onChange(m); open = false }) }
+        }
+    }
+}
+
+/** Shows the lines of the bill's text where the amount and the date were found, highlighted, so they can be checked at a glance. */
+@Composable
+private fun FoundOnBill(ocr: String, amount: Double?, foreign: Double?, date: LocalDate?) {
+    if (ocr.isBlank()) return
+    val lines = ocr.lines().map { it.trim() }.filter { it.isNotEmpty() }
+    val a = foreign ?: amount
+    val amountLine = a?.let { v ->
+        val whole = Math.round(v).toString()
+        val forms = listOf(String.format(java.util.Locale.ENGLISH, "%.2f", v), String.format(java.util.Locale.ENGLISH, "%,.2f", v), whole, String.format(java.util.Locale.ENGLISH, "%,d", Math.round(v)))
+        lines.lastOrNull { l -> forms.any { f -> l.replace(" ", "").contains(f.replace(" ", "")) } && Regex("(?i)total|amount|payable|fare|paid|net").containsMatchIn(l) }
+            ?: lines.lastOrNull { l -> forms.any { f -> l.contains(f) } }
+    }
+    val dateLine = date?.let { d ->
+        val mon = d.month.getDisplayName(java.time.format.TextStyle.SHORT, java.util.Locale.ENGLISH)
+        val forms = listOf("%02d/%02d/%d".format(d.dayOfMonth, d.monthValue, d.year), "%02d-%02d-%d".format(d.dayOfMonth, d.monthValue, d.year), "%02d/%02d/%02d".format(d.dayOfMonth, d.monthValue, d.year % 100),
+            "%02d-%02d-%02d".format(d.dayOfMonth, d.monthValue, d.year % 100), "%d %s".format(d.dayOfMonth, mon), "%02d %s".format(d.dayOfMonth, mon), d.toString())
+        lines.firstOrNull { l -> forms.any { l.contains(it, ignoreCase = true) } }
+    }
+    if (amountLine == null && dateLine == null) return
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("Found on the bill", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            listOfNotNull(dateLine?.let { "Date" to it }, amountLine?.let { "Amount" to it }).forEach { (k, l) ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(k, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(56.dp))
+                    Text(l.take(60), style = MaterialTheme.typography.bodySmall.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace),
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.background(MaterialTheme.colorScheme.primaryContainer, androidx.compose.foundation.shape.RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp))
+                }
+            }
         }
     }
 }

@@ -79,7 +79,7 @@ fun GenerateScreen(tripId: Long, nav: NavHostController) {
     val jobs by c.jobs.states.collectAsState()
     val gen = jobs[c.jobs.generateKey(tripId)]
     var confirmArchive by rememberSaveable { mutableStateOf(false) }
-    val issues by produceState<List<ValidationIssue>?>(null, expenses, limits) { value = c.repo.validate(tripId, limits) }
+    val issues by produceState<List<ValidationIssue>?>(null, expenses, limits) { value = c.repo.validate(tripId, limits, c.prefs.ui.value.homeCity) }
     val entities by remember(tripId) { c.repo.entities.observeForTrip(tripId) }.collectAsState(initial = emptyList())
     // Auto-split: preview the balanced allocation (stable: re-running changes nothing).
     LaunchedEffect(expenses.size, expenses.sumOf { it.amount ?: 0.0 }, entities, trip?.splitMode) {

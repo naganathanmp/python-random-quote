@@ -7,9 +7,27 @@ Bills are read on the phone (text recognition + an optional open-source AI model
 phone). Internet is used only to download that AI model once and, if you turn it on, to share a
 project with your team through your firm's own server.
 
-**Install:** copy `release/TA-Reimburse-v2.0.4.apk` to your phone, open it and allow
+**Install:** copy `release/TA-Reimburse-v2.1.0.apk` to your phone, open it and allow
 "Install unknown apps" for your file manager / browser when Android asks. Android 10 or newer.
-v2.0.4 installs over any earlier version and keeps existing claims (database upgraded automatically).
+v2.1.0 installs over any earlier version and keeps existing claims (database upgraded automatically).
+
+## What's new in 2.1.0 - make the app yours
+
+- **Appearance (Settings):** Light / Dark / System theme; accent colour (signal yellow, saffron,
+  teal, blue, violet, or your wallpaper's colours on Android 12+); text size inside the app;
+  Reduce motion (instant screens). New wayfinding look: paper-white / graphite with signal yellow.
+- **Numbers & defaults:** Indian (₹1,23,456) or international (₹123,456) grouping and paise on/off,
+  applied on screens, in the PDF and in the Excel statement; default currency for new claims; home
+  city (shown as the route code; a claim in your home city gets a policy reminder).
+- **Claims as a departure board:** route codes like BLR→HOS, search by client, place or claim no.,
+  and filters (Open, To review, Awaiting payment, Team).
+- **Scan button** on every open claim, with **batch scanning**: the camera reopens after each
+  photo; press Back in the camera to add them all at once.
+- **Swipe between bills** while reviewing ("Bill 4 of 12"); a "Found on the bill" box shows the
+  exact lines where the amount and date were read.
+- **Reminders:** a daily notification for claims not submitted 7 days after the trip and bills
+  still to review.
+- **Automatic weekly backup** to a folder you choose (phone or Google Drive), keeping the last 4.
 
 ## What's new in 2.0.4
 
@@ -202,7 +220,7 @@ v2.0.4 installs over any earlier version and keeps existing claims (database upg
 
 ```bash
 cd android-ta-reimbursement
-./gradlew :app:testDebugUnitTest   # 81 JVM + Robolectric tests (parser, AI prompt/validation eval, trust check, duplicates, signatures verified with pdfsig/openssl, two-phone team sync, Excel template, PDF, split, currency, travellers, OCR, budget, migrations 1→4, security, rotation/crash resilience, workflows, UI)
+./gradlew :app:testDebugUnitTest   # 101 JVM + Robolectric tests (parser, AI prompt/validation eval, trust check, duplicates, signatures verified with pdfsig/openssl, two-phone team sync, Excel template, PDF, split, currency, travellers, OCR, budget, migrations 1→4, security, rotation/crash resilience, workflows, UI)
 ./gradlew :app:lintRelease
 ./gradlew :app:assembleRelease     # needs keystore.properties (not committed) or falls back to debug signing
 tools/check-release.sh app/build/outputs/apk/release/app-release.apk   # must print RELEASE CHECK PASSED

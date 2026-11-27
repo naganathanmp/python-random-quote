@@ -32,8 +32,9 @@ object TaStatementWorkbook {
     private const val LIGHT = "F2F2F2"
     private const val GREEN = "D7E4BD"
     private const val ORANGE = "F79646"
-    private const val ACC0 = "_ * #,##0_ ;_ * \\-#,##0_ ;_ * \"-\"??_ ;_ @_ "
-    private const val ACC2 = "_ * #,##0.00_ ;_ * \\-#,##0.00_ ;_ * \"-\"??_ ;_ @_ "
+    // Settings → Number format: Indian grouping (12,34,567) uses Excel's conditional format; international keeps 1,234,567.
+    private val ACC0 get() = if (com.tareimbursement.app.core.AmountWords.indianGrouping) "[>=10000000]##\\,##\\,##\\,##0;[>=100000]##\\,##\\,##0;##,##0" else "_ * #,##0_ ;_ * \\-#,##0_ ;_ * \"-\"??_ ;_ @_ "
+    private val ACC2 get() = if (com.tareimbursement.app.core.AmountWords.indianGrouping) "[>=10000000]##\\,##\\,##\\,##0.00;[>=100000]##\\,##\\,##0.00;##,##0.00" else "_ * #,##0.00_ ;_ * \\-#,##0.00_ ;_ * \"-\"??_ ;_ @_ "
     private const val CAMBRIA = "Cambria"
 
     private fun con(bold: Boolean = true, fill: String? = "FFFFFF", border: String? = "thin", h: String? = null, num: String? = null, wrap: Boolean = false) =

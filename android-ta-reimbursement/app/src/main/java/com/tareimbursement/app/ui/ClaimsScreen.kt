@@ -1,6 +1,11 @@
 package com.tareimbursement.app.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.material.icons.outlined.Search
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -52,8 +57,26 @@ fun ClaimsScreen(nav: NavHostController, modifier: Modifier) {
     val all by remember(Unit) { c.repo.trips.observeWithStats() }.collectAsState(initial = null)
     val jobs by c.jobs.states.collectAsState()
     val profile by c.prefs.profile.collectAsState()
-    val drafts = all?.filter { it.claimStatus == ClaimStatus.DRAFT }.orEmpty()
-    val awaiting = all?.filter { it.claimStatus == ClaimStatus.SUBMITTED || it.claimStatus == ClaimStatus.APPROVED }.orEmpty()
+    val ui by c.prefs.ui.collectAsState()
+    var query by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf("") }
+    var filter by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf("ALL") }
+    val home = ui.homeCity.ifBlank { profile.baseLocation }
+    // Search by title, client, project code or place; filter chips narrow by status.
+    fun match(t: TripWithStats): Boolean {
+        val q = query.trim().lowercase()
+        val text = q.isBlank() || listOf(t.title, t.clientName, t.projectCode, t.location, t.claimNumber).any { it.lowercase().contains(q) }
+        val f = when (filter) {
+            "DRAFT" -> t.claimStatus == ClaimStatus.DRAFT
+            "AWAIT" -> t.claimStatus == ClaimStatus.SUBMITTED || t.claimStatus == ClaimStatus.APPROVED
+            "REVIEW" -> t.pendingCount > 0 && t.claimStatus == ClaimStatus.DRAFT
+            "TEAM" -> t.shared
+            else -> true
+        }
+        return text && f
+    }
+    val drafts = all?.filter { it.claimStatus == ClaimStatus.DRAFT && match(it) }.orEmpty()
+    val awaiting = all?.filter { (it.claimStatus == ClaimStatus.SUBMITTED || it.claimStatus == ClaimStatus.APPROVED) && match(it) }.orEmpty()
+    val anyClaims = all?.any { it.claimStatus == ClaimStatus.DRAFT || it.claimStatus == ClaimStatus.SUBMITTED || it.claimStatus == ClaimStatus.APPROVED } == true
 
     Box(modifier.fillMaxSize()) {
         LazyColumn(contentPadding = PaddingValues(16.dp, 16.dp, 16.dp, 96.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -63,15 +86,28 @@ fun ClaimsScreen(nav: NavHostController, modifier: Modifier) {
                     Text("Your open TA claims", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
-            if (all != null && drafts.isEmpty()) {
+            if (anyClaims) item {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    androidx.compose.material3.OutlinedTextField(query, { query = it }, placeholder = { Text("Search client, place or claim no.") }, singleLine = true,
+                        leadingIcon = { Icon(androidx.compose.material.icons.Icons.Outlined.Search, null) }, modifier = Modifier.fillMaxWidth())
+                    Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf("ALL" to "All", "DRAFT" to "Open", "REVIEW" to "To review", "AWAIT" to "Awaiting payment", "TEAM" to "Team").forEach { (k, l) ->
+                            androidx.compose.material3.FilterChip(selected = filter == k, onClick = { filter = k }, label = { Text(l) })
+                        }
+                    }
+                }
+            }
+            if (all != null && !anyClaims) {
                 item { HowItWorks() }
+            } else if (all != null && drafts.isEmpty() && awaiting.isEmpty()) {
+                item { Text("No claims match.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             }
             items(drafts, key = { it.id }) { t ->
-                TripCard(t, jobs[c.jobs.importKey(t.id)] is JobState.Running) { nav.navigate(Routes.trip(t.id)) }
+                TripCard(t, jobs[c.jobs.importKey(t.id)] is JobState.Running, home) { nav.navigate(Routes.trip(t.id)) }
             }
             if (awaiting.isNotEmpty()) {
                 item { Text("Awaiting reimbursement", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 8.dp)) }
-                items(awaiting, key = { "a${it.id}" }) { t -> TripCard(t, false) { nav.navigate(Routes.claim(t.id)) } }
+                items(awaiting, key = { "a${it.id}" }) { t -> TripCard(t, false, home) { nav.navigate(Routes.claim(t.id)) } }
             }
         }
         ExtendedFloatingActionButton(
@@ -107,7 +143,7 @@ private fun Step(icon: ImageVector, title: String, body: String) {
 }
 
 @Composable
-fun TripCard(t: TripWithStats, processing: Boolean, onClick: () -> Unit) {
+fun TripCard(t: TripWithStats, processing: Boolean, home: String = "", onClick: () -> Unit) {
     Card(
         onClick = onClick, modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -115,6 +151,14 @@ fun TripCard(t: TripWithStats, processing: Boolean, onClick: () -> Unit) {
     ) {
         Column(Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                // Departure-board route code, e.g. BLR→HOS.
+                val code = com.tareimbursement.app.core.CityCodes.route(home, t.location)
+                if (code.isNotBlank()) {
+                    Text(code, style = MaterialTheme.typography.labelLarge.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, letterSpacing = androidx.compose.ui.unit.TextUnit(0.5f, androidx.compose.ui.unit.TextUnitType.Sp)),
+                        color = Color(0xFFF3EFE3), fontWeight = FontWeight.Bold,
+                        modifier = Modifier.background(Color(0xFF16181C), androidx.compose.foundation.shape.RoundedCornerShape(6.dp)).padding(horizontal = 8.dp, vertical = 6.dp))
+                    Spacer(Modifier.width(12.dp))
+                }
                 Column(Modifier.weight(1f)) {
                     Text(t.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text("${t.clientName} · ${t.projectCode}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -125,7 +169,7 @@ fun TripCard(t: TripWithStats, processing: Boolean, onClick: () -> Unit) {
             Spacer(Modifier.height(10.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(Fmt.range(t.startDate, t.endDate), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
-                Text(Fmt.inr(t.total), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                Text(Fmt.inr(t.total), style = MaterialTheme.typography.titleMedium.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace), color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold)
             }
             Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("${t.expenseCount} bill${if (t.expenseCount == 1) "" else "s"}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)

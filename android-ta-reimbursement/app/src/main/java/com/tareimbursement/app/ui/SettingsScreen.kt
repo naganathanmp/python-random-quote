@@ -89,6 +89,8 @@ fun SettingsScreen(nav: NavHostController, modifier: Modifier) {
                 SettingRow(Icons.Outlined.Person, profile.name, "${profile.employeeCode}${if (profile.designation.isNotBlank()) " · ${profile.designation}" else ""}\nClaims e-mailed to: ${profile.approverEmail.ifBlank { "not set" }}") { nav.navigate("profile") }
             }
         }
+        item { AppearanceCard() }
+        item { DefaultsCard() }
         item { AiSettingsCard() }
         item {
             SectionCard(title = "Team & documents") {
@@ -111,6 +113,7 @@ fun SettingsScreen(nav: NavHostController, modifier: Modifier) {
                 busy?.let { Text(it, style = MaterialTheme.typography.bodySmall); LinearProgressIndicator(Modifier.fillMaxWidth()) }
             }
         }
+        item { AutoBackupCard() }
         item {
             SectionCard(title = "Privacy") {
                 Row(verticalAlignment = Alignment.Top) {

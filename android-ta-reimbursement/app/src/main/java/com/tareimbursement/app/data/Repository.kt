@@ -318,11 +318,13 @@ class Repository(val db: AppDatabase, val filesDir: File) {
     suspend fun logEvent(tripId: Long, type: String, message: String) { events.insert(log(tripId, type, message)) }
 
     /** Checks before generating the statement. Blocking issues must be fixed first. */
-    suspend fun validate(tripId: Long, limits: Map<ExpenseCategory, Double>): List<ValidationIssue> {
+    suspend fun validate(tripId: Long, limits: Map<ExpenseCategory, Double>, homeCity: String = ""): List<ValidationIssue> {
         val trip = trips.get(tripId) ?: return listOf(ValidationIssue(null, "Claim not found", true))
         val list = expenses.forTrip(tripId)
         val out = mutableListOf<ValidationIssue>()
         if (list.isEmpty()) out += ValidationIssue(null, "Add at least one expense before generating the statement.", true)
+        if (homeCity.isNotBlank() && trip.location.trim().equals(homeCity.trim(), ignoreCase = true))
+            out += ValidationIssue(null, "This claim is in your home city ($homeCity). Check your travel policy - local expenses are often not claimable as TA.", false)
         val people = travellers.forTrip(tripId)
         val ents = entities.forTrip(tripId)
         if (trip.split != SplitMode.NONE && ents.size < 2) out += ValidationIssue(null, "Billing split is on: add at least two client entities in claim details, or turn the split off.", true)
