@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Only these folders can ever be shared (and only per-intent, read-only):
+     claim attachments/outputs, camera captures, and the local error report.
+     The database, settings and other private files are never exposed. -->
+<paths>
+    <files-path name="trips" path="trips/" />
+    <files-path name="crash" path="crash/" />
+    <cache-path name="camera" path="camera/" />
+</paths>
